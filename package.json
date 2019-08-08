@@ -1,0 +1,16 @@
+{
+    "name": "torrent",
+    "version": "1.0.0",
+    "description": "",
+    "scripts": {
+        "build": "./node_modules/.bin/babel src -d public/js --watch"
+    },
+    "devDependencies": {
+        "@babel/cli": "^7.5.0",
+        "@babel/core": "^7.5.4",
+        "@babel/preset-env": "^7.5.4",
+        "@babel/preset-react": "^7.0.0"
+    },
+    "author": "Charana Nandasena",
+    "license": "ISC"
+}
