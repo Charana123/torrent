@@ -6,11 +6,12 @@
         "build": "./node_modules/.bin/babel src -d public/js --watch"
     },
     "devDependencies": {
-        "@babel/cli": "^7.5.0",
-        "@babel/core": "^7.5.4",
-        "@babel/preset-env": "^7.5.4",
-        "@babel/preset-react": "^7.0.0"
+        "webpack": "4.38.0",
+        "webpack-cli": "^3.3.6"
     },
     "author": "Charana Nandasena",
-    "license": "ISC"
+    "license": "ISC",
+    "dependencies": {
+        "video.js": "^7.6.0"
+    }
 }

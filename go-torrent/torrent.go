@@ -1,23 +1,23 @@
 package torrent
 
-import "io"
+// import "io"
 
-type Torrent struct {
-}
+// type Torrent struct {
+// }
 
-func (t *Torrent) GetStream() Reader {
+// func (t *Torrent) GetStream() Reader {
 
-}
+// }
 
-type Reader interface {
-	io.Reader
-	io.Seeker
-	io.Closer
-}
+// type Reader interface {
+// 	io.Reader
+// 	io.Seeker
+// 	io.Closer
+// }
 
-type TorrentStream struct {
-}
+// type TorrentStream struct {
+// }
 
-func (r Reader) Read(b []byte) (n int, err error) {
+// func (r Reader) Read(b []byte) (n int, err error) {
 
-}
+// }
