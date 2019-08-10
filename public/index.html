@@ -4,15 +4,12 @@
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width">
         <title> Torrent HLS </title>
-        <script type="text/javascript" src="https://unpkg.com/systemjs@0.19.29/dist/system.js" crossorigin></script>
-        <script type="text/javascript" src="/public/js/systemjs.config.js"></script>
-        <script>
-            System.import("/public/js/index.js");
-        </script>
+        <link rel="stylesheet" href="https://unpkg.com/video.js/dist/video-js.css">
+        <script src="/public/dist/bundle.js" async> </script>
     </head>
     <body>
-        <video-js id="video-player" width="600" height="300" class="vjs-default-skin" controls>
-            <source src="/public/video/small.m3u8" type="application/x-mpegURL">
+        <video-js id="video-player" data-setup='{}' controls>
+            <source src="/public/video/out.m3u8" type="application/x-mpegURL">
         </video-js>
     </body>
 </html>
