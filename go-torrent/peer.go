@@ -2,15 +2,21 @@ package torrent
 
 import "net"
 
-type Peer struct {
-	Addr               *net.TCPAddr
-	PeerHasChoked      bool
-	PerIsInterested    bool
-	ClientIsInterested bool
-	ClientHasChoked    bool
+type peerChokeChans struct {
+	// e.g. notify choke algorithm of current peer state
 }
 
-// handeshake and start handling messages from each peer connection
-// send bitfield message
-// from each thread update the global list of peer that have unchoked
-// Use a manager thread to organise the downloading and uploading
+type peer struct {
+	id             string
+	conn           net.Conn
+	toChokeChans   *peerChokeChans
+	fromChokeChans *chokePeerChans
+}
+
+func (p *peer) start() {
+	// send handshake to peer
+	// obtain bitfield from choke algorithm
+	// send bitfield to peer
+	// spawn thread to process incoming messages
+	// use this thread to process other events
+}

@@ -1,23 +1,116 @@
 package torrent
 
-// import "io"
+import (
+	"bytes"
+	"crypto/sha1"
+	"fmt"
+	"log"
+	"math/rand"
+	"os"
 
-// type Torrent struct {
-// }
+	bencode "github.com/jackpal/bencode-go"
+)
 
-// func (t *Torrent) GetStream() Reader {
+var (
+	PEER_ID = make([]byte, 0, 20)
+)
 
-// }
+func init() {
+	PEER_ID = append(PEER_ID, []byte("-GT0001-")...)
+	_, err := rand.Read(PEER_ID[8:])
+	if err != nil {
+		log.Fatalln(err)
+	}
+}
 
-// type Reader interface {
-// 	io.Reader
-// 	io.Seeker
-// 	io.Closer
-// }
+type Torrent struct {
+	metaInfo *metaInfo
+	infoHash []byte
+}
 
-// type TorrentStream struct {
-// }
+type metaInfo struct {
+	Info struct {
+		PieceLength int `bencode:"piece length"`
+		Pieces      string
+		Private     int
+		Name        string
+		Length      int
+		Md5sum      string
+		Files       []struct {
+			Length int
+			Md5sum string
+			Path   []string
+		}
+	}
+	Announce     string
+	AnnounceList [][]string `bencode:"announce-list"`
+	CreationDate int        `bencode:"creation date"`
+	Comment      string
+	CreatedBy    string `bencode:"created by"`
+	Encoding     string
+}
 
-// func (r Reader) Read(b []byte) (n int, err error) {
+func NewTorrent(filename string) (*Torrent, error) {
+	torrent := &Torrent{}
 
-// }
+	file, err := os.Open(filename)
+	if err != nil {
+		return nil, err
+	}
+
+	metaInfo, err := bencode.Decode(file)
+	if err != nil {
+		return nil, err
+	}
+	metaInfoMap, ok := metaInfo.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("Malformed torrent file %s", filename)
+	}
+	infoMap, ok := metaInfoMap["info"]
+	if !ok {
+		return nil, fmt.Errorf("Malformed torrent file %s", filename)
+	}
+
+	infoBencode := &bytes.Buffer{}
+	bencode.Marshal(infoBencode, infoMap)
+
+	infoHash := sha1.Sum(infoBencode.Bytes())
+	torrent.infoHash = infoHash[:]
+
+	file.Seek(0, 0)
+	err = bencode.Unmarshal(file, &torrent.metaInfo)
+	if err != nil {
+		return nil, err
+	}
+	return torrent, nil
+}
+
+func (t *Torrent) ServePeers() {
+
+}
+
+// Start/Resume downloading/uploading torrent
+func (t *Torrent) Start(serverPeerMChans *serverPeerMChans, port int) chan int {
+
+	// Requests the peer list, spawns another process to send
+	// the peer list to the peer manager, manager makes a connection or ignores
+
+	// peerManager := NewPeerManager()
+	quit := make(chan int)
+	disk := newDisk()
+	trackerM := newTrackerManager(t, &disk.stats, quit, port, nil)
+	go trackerM.start()
+	peerM := newPeerManager(serverPeerMChans, trackerM.peerMChans)
+	go peerM.start()
+	return quit
+}
+
+// Stop downloading/uploading torrent
+func (t *Torrent) Stop() {
+
+}
+
+// Delete (potentially only partially) downloaded torrent files
+func (t *Torrent) Cleanup() {
+
+}

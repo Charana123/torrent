@@ -19,56 +19,63 @@ package main
 // }
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
-	"math/rand"
-	"time"
+	"log"
 
-	torrent "github.com/Charana123/torrent/go-torrent"
+	"github.com/Charana123/torrent/go-torrent"
 )
 
 func main() {
-	mi, err := torrent.NewMetaInfo("/Users/charana/Downloads/79EFD3085CFDF8C77189B9828D1C6A50659F863F.torrent")
-	if err != nil {
-		panic(err)
-	}
+	// mi, err := torrent.NewMetaInfo("/Users/charana/Downloads/79EFD3085CFDF8C77189B9828D1C6A50659F863F.torrent")
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	if err != nil {
-		panic(err)
-	}
+	// if err != nil {
+	// 	panic(err)
+	// }
 
-	peerIDBuffer := &bytes.Buffer{}
-	binary.Write(peerIDBuffer, binary.BigEndian, time.Now().Unix())
-	binary.Write(peerIDBuffer, binary.BigEndian, [12]byte{})
-	peerID := [20]byte{}
-	copy(peerID[:], peerIDBuffer.Bytes()[:20])
+	// peerIDBuffer := &bytes.Buffer{}
+	// binary.Write(peerIDBuffer, binary.BigEndian, time.Now().Unix())
+	// binary.Write(peerIDBuffer, binary.BigEndian, [12]byte{})
+	// peerID := [20]byte{}
+	// copy(peerID[:], peerIDBuffer.Bytes()[:20])
 
-	key := rand.Int31()
+	// key := rand.Int31()
 
-	trackerResponse, err := torrent.GetPeers(
-		mi.AnnounceList,
-		&torrent.TrackerRequest{
-			InfoHash:   mi.InfoHash,
-			PeerID:     peerID,
-			Uploaded:   0,
-			Downloaded: 0,
-			Left:       1000,
-			Event:      "started",
-			Key:        key,
-		})
-	if err != nil {
-		panic(err)
-	}
-	for _, peer := range trackerResponse.Peers {
-		fmt.Println(peer.Addr.String())
-	}
+	// trackerResponse, err := torrent.GetPeers(
+	// 	mi.AnnounceList,
+	// 	&torrent.TrackerRequest{
+	// 		InfoHash:   mi.InfoHash,
+	// 		PeerID:     peerID,
+	// 		Uploaded:   0,
+	// 		Downloaded: 0,
+	// 		Left:       1000,
+	// 		Event:      "started",
+	// 		Key:        key,
+	// 	})
+	// if err != nil {
+	// }z
+	// for _, peer := range trackerResponse.Peers {
+	// 	fmt.Println(peer.Addr.String())
+	// }
 
 	// fmt.Println(metainfo.Announce)
 	// fmt.Println(metainfo.CreationDate)
 	// fmt.Println(metainfo.Comment)
 	// fmt.Println(metainfo.CreatedBy)
 	// fmt.Println(metainfo.Encoding)
+
+	quit := make(chan int)
+	server, serverPeerMChans, serverPort, err := torrent.NewServer(quit)
+	if err != nil {
+		log.Panicln()
+	}
+	go server.Serve()
+	t, err := torrent.NewTorrent("/Users/charana/Downloads/08c2309bd3eaabf038b60ba8a82273fe8f474da2.torrent")
+	if err != nil {
+		log.Panicln(err)
+	}
+	go t.Start(serverPeerMChans, serverPort)
 }
 
 // func main() {
