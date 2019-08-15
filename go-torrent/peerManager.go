@@ -2,35 +2,37 @@ package torrent
 
 import (
 	"net"
+
+	bitmap "github.com/boljen/go-bitmap"
 )
 
 type peerMChokeChans struct {
-	newPeer chan *chokePeerChans
+	newPeer chan *peer
 }
 
 type peerManager struct {
-	//torrent        *Torrent
+	torrent        *Torrent
 	serverChans    *serverPeerMChans
 	trackerChans   *trackerPeerMChans
 	chokeChans     *peerMChokeChans
 	chokePeerChans *peerChokeChans
-	diskPeerChans  *diskPeerChans
-	peers          map[string]*peer
-	numPeers       int
-	maxPeers       int
+	// diskPeerChans  *peerDiskChans
+	peers    map[string]*peer
+	numPeers int
+	maxPeers int
 }
 
 func newPeerManager(
-	//torrent *Torrent,
+	torrent *Torrent,
 	serverChans *serverPeerMChans,
 	trackerChans *trackerPeerMChans) *peerManager {
 
 	pm := &peerManager{
-		//torrent:      torrent,
+		torrent:      torrent,
 		serverChans:  serverChans,
 		trackerChans: trackerChans,
 		chokeChans: &peerMChokeChans{
-			newPeer: make(chan *chokePeerChans),
+			newPeer: make(chan *peer),
 		},
 	}
 	return pm
@@ -52,6 +54,8 @@ func (pm *peerManager) start() {
 			fromChokeChans := &chokePeerChans{}
 			peer.toChokeChans = pm.chokePeerChans
 			peer.fromChokeChans = fromChokeChans
+			peer.torrent = pm.torrent
+			peer.bitfield = bitmap.New(pm.torrent.numPieces)
 			go func() { pm.chokeChans.newPeer <- fromChokeChans }()
 
 			pm.peers[peer.id] = peer

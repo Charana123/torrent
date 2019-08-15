@@ -24,8 +24,9 @@ func init() {
 }
 
 type Torrent struct {
-	metaInfo *metaInfo
-	infoHash []byte
+	metaInfo  *metaInfo
+	infoHash  []byte
+	numPieces int
 }
 
 type metaInfo struct {
@@ -76,6 +77,7 @@ func NewTorrent(filename string) (*Torrent, error) {
 
 	infoHash := sha1.Sum(infoBencode.Bytes())
 	torrent.infoHash = infoHash[:]
+	torrent.numPieces = len(torrent.metaInfo.Info.Pieces) / 20
 
 	file.Seek(0, 0)
 	err = bencode.Unmarshal(file, &torrent.metaInfo)
@@ -98,10 +100,12 @@ func (t *Torrent) Start(serverPeerMChans *serverPeerMChans, port int) chan int {
 	// peerManager := NewPeerManager()
 	quit := make(chan int)
 	disk := newDisk()
+
 	trackerM := newTrackerManager(t, &disk.stats, quit, port, nil)
 	go trackerM.start()
 	peerM := newPeerManager(serverPeerMChans, trackerM.peerMChans)
 	go peerM.start()
+	choke := newChoke(peerM.chokeChans, peerM.chokePeerChans)
 	return quit
 }
 
