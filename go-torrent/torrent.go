@@ -97,15 +97,26 @@ func (t *Torrent) Start(serverPeerMChans *serverPeerMChans, port int) chan int {
 	// Requests the peer list, spawns another process to send
 	// the peer list to the peer manager, manager makes a connection or ignores
 
-	// peerManager := NewPeerManager()
 	quit := make(chan int)
-	disk := newDisk()
-
-	trackerM := newTrackerManager(t, &disk.stats, quit, port, nil)
-	go trackerM.start()
-	peerM := newPeerManager(serverPeerMChans, trackerM.peerMChans)
+	progressStats := &progressStats{}
+	trackerPeerMChans := &trackerPeerMChans{
+		peers: make(chan *peer),
+	}
+	disk := newDisk(progressStats)
+	go disk.start()
+	tracker := newTracker(t, progressStats, quit, port, nil, trackerPeerMChans)
+	go tracker.start()
+	peerMChokeChans := &peerMChokeChans{
+		newPeer: make(chan *chokePeerChans),
+	}
+	peerChokeChans := &peerChokeChans{
+		clientChokeStateChan: make(chan *chokeState),
+		peerHaveMessagesChan: make(chan *peerHaveMessages),
+	}
+	peerM := newPeerManager(t, serverPeerMChans, trackerPeerMChans, peerMChokeChans, peerChokeChans)
 	go peerM.start()
-	choke := newChoke(peerM.chokeChans, peerM.chokePeerChans)
+	choke := newChoke(peerMChokeChans, peerChokeChans)
+	go choke.start()
 	return quit
 }
 

@@ -88,9 +88,9 @@ func (tr *tracker) announceUDP(trackerURLWithoutSchema string, event int, connec
 	binary.Write(announceRequest, binary.BigEndian, transactionID)
 	binary.Write(announceRequest, binary.BigEndian, tr.torrent.infoHash)
 	binary.Write(announceRequest, binary.BigEndian, PEER_ID)
-	binary.Write(announceRequest, binary.BigEndian, tr.stats.downloaded)
-	binary.Write(announceRequest, binary.BigEndian, tr.stats.left)
-	binary.Write(announceRequest, binary.BigEndian, tr.stats.uploaded)
+	binary.Write(announceRequest, binary.BigEndian, tr.progressStats.downloaded)
+	binary.Write(announceRequest, binary.BigEndian, tr.progressStats.left)
+	binary.Write(announceRequest, binary.BigEndian, tr.progressStats.uploaded)
 	binary.Write(announceRequest, binary.BigEndian, event)
 	if tr.ip != nil {
 		binary.Write(announceRequest, binary.BigEndian, tr.ip)

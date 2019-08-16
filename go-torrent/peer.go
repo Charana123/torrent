@@ -32,26 +32,6 @@ var (
 	BLOCK_READ_REQUEST_DELAY    = time.Second * time.Duration(5)
 )
 
-type chokeState struct {
-	peerID   string
-	isChoked bool
-}
-
-type peerHaveMessages struct {
-	peerID       string
-	pieceIndices []int
-}
-
-type peerChokeChans struct {
-	clientChokeStateChan chan *chokeState
-	peerHaveMessagesChan chan *peerHaveMessages
-}
-
-type peerDiskChans struct {
-	blockReadRequestChan  chan *blockReadRequest
-	pieceWriteRequestChan chan *pieceWriteRequest
-}
-
 type pieceDownload struct {
 	pieceIndex        int
 	numBlocksInPiece  int

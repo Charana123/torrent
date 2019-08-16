@@ -15,29 +15,15 @@ const (
 	STOPPED   = 3
 )
 
-type peerInfo struct {
-	ip   net.IP
-	port uint16
-}
-
-type tStats struct {
-	leechers int32
-	seeders  int32
-}
-
-type trackerPeerMChans struct {
-	peers chan *peer
-}
-
 type tracker struct {
-	torrent      *Torrent
-	stats        *torrentStats
-	quit         chan int
-	port         uint16
-	ip           *net.IP
-	key          int32
-	numwant      int32
-	announceResp *struct {
+	torrent       *Torrent
+	progressStats *progressStats
+	quit          chan int
+	port          uint16
+	ip            *net.IP
+	key           int32
+	numwant       int32
+	announceResp  struct {
 		FailureReason string `bencode:"failure reason"`
 		Interval      int32
 		Leechers      int32 `bencode:"incomplete"`
@@ -46,9 +32,9 @@ type tracker struct {
 	}
 	peerMChans *trackerPeerMChans
 	// TODO - who controls these ?
-	tStatsEvent        chan int
-	tStatsResponse     chan *tStats
-	tCompleteEventChan chan int
+	// tStatsEvent        chan int
+	// tStatsResponse     chan *TrackerStats
+	// tCompleteEventChan chan int
 }
 
 func genKey() int32 {
@@ -56,23 +42,22 @@ func genKey() int32 {
 	return rand.Int31()
 }
 
-func newTrackerManager(torrent *Torrent, stats *torrentStats, quit chan int,
-	port int, ip *net.IP) *tracker {
+func newTracker(
+	torrent *Torrent,
+	progressStats *progressStats,
+	quit chan int, port int, ip *net.IP,
+	peerMChans *trackerPeerMChans) *tracker {
 
 	// TODO - DI for `tStatsEvent` and `tCompleteEventChan`
 	// TODO - Pass `tStatsResponse` to whoever
 	return &tracker{
-		torrent: torrent,
-		stats:   stats,
-		quit:    quit,
-		port:    uint16(port),
-		ip:      ip,
-		key:     genKey(),
-		numwant: 50,
-		peerMChans: &trackerPeerMChans{
-			peers: make(chan *peer),
-		},
-		tStatsResponse: make(chan *tStats),
+		torrent:       torrent,
+		progressStats: progressStats,
+		quit:          quit,
+		port:          uint16(port),
+		ip:            ip,
+		key:           genKey(),
+		numwant:       50,
 	}
 }
 
@@ -99,13 +84,13 @@ func (tr *tracker) announceTracker(trackerURL string) error {
 			return nil
 		case <-time.After(intervalD):
 			err = queryTracker(trackerURL, NONE)
-		case <-tr.tStatsEvent:
-			tr.tStatsResponse <- &tStats{
-				leechers: tr.announceResp.Leechers,
-				seeders:  tr.announceResp.Seeders,
-			}
-		case <-tr.tCompleteEventChan:
-			err = queryTracker(trackerURL, COMPLETED)
+			// case <-tr.tStatsEvent:
+			// 	tr.tStatsResponse <- &tStats{
+			// 		leechers: tr.announceResp.Leechers,
+			// 		seeders:  tr.announceResp.Seeders,
+			// 	}
+			// case <-tr.tCompleteEventChan:
+			// 	err = queryTracker(trackerURL, COMPLETED)
 		}
 		if err != nil {
 			return nil

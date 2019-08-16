@@ -6,10 +6,6 @@ import (
 	bitmap "github.com/boljen/go-bitmap"
 )
 
-type peerMChokeChans struct {
-	newPeer chan *peer
-}
-
 type peerManager struct {
 	torrent        *Torrent
 	serverChans    *serverPeerMChans
@@ -25,15 +21,16 @@ type peerManager struct {
 func newPeerManager(
 	torrent *Torrent,
 	serverChans *serverPeerMChans,
-	trackerChans *trackerPeerMChans) *peerManager {
+	trackerChans *trackerPeerMChans,
+	chokeChans *peerMChokeChans,
+	chokePeerChans *peerChokeChans) *peerManager {
 
 	pm := &peerManager{
-		torrent:      torrent,
-		serverChans:  serverChans,
-		trackerChans: trackerChans,
-		chokeChans: &peerMChokeChans{
-			newPeer: make(chan *peer),
-		},
+		torrent:        torrent,
+		serverChans:    serverChans,
+		trackerChans:   trackerChans,
+		chokeChans:     chokeChans,
+		chokePeerChans: chokePeerChans,
 	}
 	return pm
 }
@@ -55,7 +52,7 @@ func (pm *peerManager) start() {
 			peer.toChokeChans = pm.chokePeerChans
 			peer.fromChokeChans = fromChokeChans
 			peer.torrent = pm.torrent
-			peer.bitfield = bitmap.New(pm.torrent.numPieces)
+			peer.clientBitfield = bitmap.New(pm.torrent.numPieces)
 			go func() { pm.chokeChans.newPeer <- fromChokeChans }()
 
 			pm.peers[peer.id] = peer

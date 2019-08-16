@@ -1,13 +1,5 @@
 package torrent
 
-type havePiece struct {
-	pieceIndex int
-}
-
-type chokePeerChans struct {
-	havePiece chan []*havePiece
-}
-
 type choke struct {
 	peerMChans *peerMChokeChans
 	peerChans  *peerChokeChans

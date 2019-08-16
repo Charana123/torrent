@@ -6,10 +6,6 @@ import (
 	"time"
 )
 
-type serverPeerMChans struct {
-	peers chan *peer
-}
-
 type Server struct {
 	port      int
 	listener  *net.TCPListener

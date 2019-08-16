@@ -25,9 +25,9 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	q.Set("info_hash", urlEncodedInfoHash)
 	urlEncodedPeerID := url.QueryEscape(string(PEER_ID))
 	q.Set("peer_id", urlEncodedPeerID)
-	q.Set("uploaded", strconv.Itoa(int(tr.stats.uploaded)))
-	q.Set("downloaded", strconv.Itoa(int(tr.stats.downloaded)))
-	q.Set("left", strconv.Itoa(int(tr.stats.left)))
+	q.Set("uploaded", strconv.Itoa(tr.progressStats.uploaded))
+	q.Set("downloaded", strconv.Itoa(tr.progressStats.downloaded))
+	q.Set("left", strconv.Itoa(tr.progressStats.left))
 	q.Set("key", strconv.Itoa(int(tr.key)))
 	switch event {
 	case COMPLETED:
