@@ -102,7 +102,11 @@ func (t *Torrent) Start(serverPeerMChans *serverPeerMChans, port int) chan int {
 	trackerPeerMChans := &trackerPeerMChans{
 		peers: make(chan *peer),
 	}
-	disk := newDisk(progressStats)
+	peerDiskChans := &peerDiskChans{
+		blockReadRequestChan:  make(chan *blockReadRequest),
+		pieceWriteRequestChan: make(chan *pieceWriteRequest),
+	}
+	disk := newDisk(progressStats, peerDiskChans)
 	go disk.start()
 	tracker := newTracker(t, progressStats, quit, port, nil, trackerPeerMChans)
 	go tracker.start()
@@ -113,7 +117,8 @@ func (t *Torrent) Start(serverPeerMChans *serverPeerMChans, port int) chan int {
 		clientChokeStateChan: make(chan *chokeState),
 		peerHaveMessagesChan: make(chan *peerHaveMessages),
 	}
-	peerM := newPeerManager(t, serverPeerMChans, trackerPeerMChans, peerMChokeChans, peerChokeChans)
+	peerM := newPeerManager(t, serverPeerMChans, trackerPeerMChans,
+		peerMChokeChans, peerChokeChans, peerDiskChans)
 	go peerM.start()
 	choke := newChoke(peerMChokeChans, peerChokeChans)
 	go choke.start()
@@ -129,3 +134,6 @@ func (t *Torrent) Stop() {
 func (t *Torrent) Cleanup() {
 
 }
+
+// TODO - verify which pieces have been downloaded and verified
+// from disk and initialise the choke algorithm appropriately

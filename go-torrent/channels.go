@@ -1,35 +1,5 @@
 package torrent
 
-// Peer -> Disk
-type peerDiskChans struct {
-	blockReadRequestChan  chan *blockReadRequest
-	pieceWriteRequestChan chan *pieceWriteRequest
-}
-
-type blockReadRequest struct {
-	pieceIndex      int
-	blockByteOffset int
-	length          int
-	resp            chan *block
-}
-
-type pieceWriteRequest struct {
-	pieceIndex int
-	data       []byte
-	// response channel ?
-}
-
-// Disk -> Peer
-type diskPeerChans struct {
-	blockResponse chan *block
-}
-
-type block struct {
-	pieceIndex      int
-	blockByteOffset int
-	blockData       []byte
-}
-
 // Server -> Peer Manager
 type serverPeerMChans struct {
 	peers chan *peer
@@ -85,4 +55,36 @@ type chokePeerChans struct {
 
 type havePiece struct {
 	pieceIndex int
+}
+
+// ======== DISK ======================
+
+// Peer -> Disk
+type peerDiskChans struct {
+	blockReadRequestChan  chan *blockReadRequest
+	pieceWriteRequestChan chan *pieceWriteRequest
+}
+
+type blockReadRequest struct {
+	pieceIndex      int
+	blockByteOffset int
+	length          int
+	resp            chan *block
+}
+
+type pieceWriteRequest struct {
+	pieceIndex int
+	data       []byte
+	// response channel ?
+}
+
+// Disk -> Peer
+type diskPeerChans struct {
+	blockResponse chan *block
+}
+
+type block struct {
+	pieceIndex      int
+	blockByteOffset int
+	blockData       []byte
 }

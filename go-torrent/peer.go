@@ -289,6 +289,29 @@ func (p *peer) handleIncomingMessages() {
 	}()
 }
 
+func newPeer(p *peer, torrent *Torrent, quit chan int,
+	toChokeChans *peerChokeChans,
+	toDiskChans *peerDiskChans) *peer {
+
+	return &peer{
+		id:           p.id,
+		conn:         p.conn,
+		torrent:      torrent,
+		quit:         quit,
+		toChokeChans: toChokeChans,
+		fromChokeChans: &chokePeerChans{
+			havePiece: make(chan []*havePiece),
+		},
+		toDiskChans: toDiskChans,
+		fromDiskChans: &diskPeerChans{
+			blockResponse: make(chan *block),
+		},
+		clientBitfield:                 bitmap.New(torrent.numPieces),
+		downloads:                      make([]*pieceDownload, 0),
+		diskRequestCancellationChannel: make(map[string]chan int),
+	}
+}
+
 func (p *peer) start() {
 
 	p.handshake()

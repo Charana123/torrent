@@ -2,8 +2,6 @@ package torrent
 
 import (
 	"net"
-
-	bitmap "github.com/boljen/go-bitmap"
 )
 
 type peerManager struct {
@@ -12,10 +10,11 @@ type peerManager struct {
 	trackerChans   *trackerPeerMChans
 	chokeChans     *peerMChokeChans
 	chokePeerChans *peerChokeChans
-	// diskPeerChans  *peerDiskChans
-	peers    map[string]*peer
-	numPeers int
-	maxPeers int
+	diskPeerChans  *peerDiskChans
+	peers          map[string]*peer
+	numPeers       int
+	maxPeers       int
+	quit           chan int
 }
 
 func newPeerManager(
@@ -23,7 +22,8 @@ func newPeerManager(
 	serverChans *serverPeerMChans,
 	trackerChans *trackerPeerMChans,
 	chokeChans *peerMChokeChans,
-	chokePeerChans *peerChokeChans) *peerManager {
+	chokePeerChans *peerChokeChans,
+	diskPeerChans *peerDiskChans) *peerManager {
 
 	pm := &peerManager{
 		torrent:        torrent,
@@ -31,6 +31,7 @@ func newPeerManager(
 		trackerChans:   trackerChans,
 		chokeChans:     chokeChans,
 		chokePeerChans: chokePeerChans,
+		diskPeerChans:  diskPeerChans,
 	}
 	return pm
 }
@@ -48,12 +49,15 @@ func (pm *peerManager) start() {
 				break
 			}
 
-			fromChokeChans := &chokePeerChans{}
-			peer.toChokeChans = pm.chokePeerChans
-			peer.fromChokeChans = fromChokeChans
-			peer.torrent = pm.torrent
-			peer.clientBitfield = bitmap.New(pm.torrent.numPieces)
-			go func() { pm.chokeChans.newPeer <- fromChokeChans }()
+			peer = newPeer(
+				peer,
+				pm.torrent,
+				pm.quit,
+				pm.chokePeerChans,
+				pm.diskPeerChans,
+			)
+			// notify choke chan ?
+			// go func() { pm.chokeChans.newPeer <- fromChokeChans }()
 
 			pm.peers[peer.id] = peer
 			pm.numPeers++
@@ -76,7 +80,8 @@ func (pm *peerManager) start() {
 				peer.conn = conn
 				pm.serverChans.peers <- peer
 			}()
+		case <-pm.quit:
+			return
 		}
-
 	}
 }
