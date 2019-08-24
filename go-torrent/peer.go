@@ -2,10 +2,8 @@ package torrent
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
-	"log"
 	"net"
 	"strconv"
 	"time"
@@ -50,12 +48,12 @@ type peer struct {
 		peerInterested   bool
 		clientInterested bool
 	}
-	torrent                        *Torrent
-	quit                           chan int
-	toChokeChans                   *peerChokeChans
-	fromChokeChans                 *chokePeerChans
-	toDiskChans                    *peerDiskChans
-	fromDiskChans                  *diskPeerChans
+	torrent        *Torrent
+	quit           chan int
+	toChokeChans   *peerChokeChans
+	fromChokeChans *chokePeerChans
+	// toDiskChans                    *peerDiskChans
+	// fromDiskChans                  *diskPeerChans
 	clientBitfield                 bitmap.Bitmap
 	downloads                      []*pieceDownload
 	diskRequestCancellationChannel map[string]chan int
@@ -184,67 +182,67 @@ func (p *peer) decodeMessage(messageID byte, payload *bytes.Buffer) {
 		binary.Read(payload, binary.BigEndian, &brr.pieceIndex)
 		binary.Read(payload, binary.BigEndian, &brr.blockByteOffset)
 		binary.Read(payload, binary.BigEndian, &brr.length)
-		brr.resp = p.fromDiskChans.blockResponse
+		//brr.resp = p.fromDiskChans.blockResponse
 
-		requestID := strconv.Itoa(brr.pieceIndex) + strconv.Itoa(brr.blockByteOffset) + strconv.Itoa(brr.length)
-		quit := make(chan int)
-		go func() {
-			select {
-			case <-quit:
-				return
-			case <-time.After(BLOCK_READ_REQUEST_DELAY):
-				p.diskRequestCancellationChannel[requestID] = nil
-				p.toDiskChans.blockReadRequestChan <- brr
-			}
-		}()
-		p.diskRequestCancellationChannel[requestID] = quit
+		// requestID := strconv.Itoa(brr.pieceIndex) + strconv.Itoa(brr.blockByteOffset) + strconv.Itoa(brr.length)
+		// quit := make(chan int)
+		// go func() {
+		// 	select {
+		// 	case <-quit:
+		// 		return
+		// 	case <-time.After(BLOCK_READ_REQUEST_DELAY):
+		// 		p.diskRequestCancellationChannel[requestID] = nil
+		// 		p.toDiskChans.blockReadRequestChan <- brr
+		// 	}
+		// }()
+		// p.diskRequestCancellationChannel[requestID] = quit
 
 	case BLOCK:
-		b := &block{}
-		binary.Read(payload, binary.BigEndian, b.pieceIndex)
-		binary.Read(payload, binary.BigEndian, b.blockByteOffset)
-		binary.Read(payload, binary.BigEndian, b.blockData)
+		// b := &block{}
+		// binary.Read(payload, binary.BigEndian, b.pieceIndex)
+		// binary.Read(payload, binary.BigEndian, b.blockByteOffset)
+		// binary.Read(payload, binary.BigEndian, b.blockData)
 
-		download, i := p.getPieceDownload(b.pieceIndex)
-		blockIndex := b.blockByteOffset / CLIENT_BLOCK_REQUEST_LENGTH
+		// download, i := p.getPieceDownload(b.pieceIndex)
+		// blockIndex := b.blockByteOffset / CLIENT_BLOCK_REQUEST_LENGTH
 
-		if download == nil {
-			log.Printf("Ignoring incoming block message for piece not being downloaded")
-			return
-		} else if b.blockByteOffset%CLIENT_BLOCK_REQUEST_LENGTH != 0 ||
-			blockIndex > 0 || blockIndex < 10 {
-			log.Printf("Illegal block byte offset within piece")
-			p.stop()
-			return
-		} else if download.blocksRecieved[blockIndex] {
-			log.Printf("Ignoring incoming block message for already downloaded block")
-			return
-		}
+		// if download == nil {
+		// 	log.Printf("Ignoring incoming block message for piece not being downloaded")
+		// 	return
+		// } else if b.blockByteOffset%CLIENT_BLOCK_REQUEST_LENGTH != 0 ||
+		// 	blockIndex > 0 || blockIndex < 10 {
+		// 	log.Printf("Illegal block byte offset within piece")
+		// 	p.stop()
+		// 	return
+		// } else if download.blocksRecieved[blockIndex] {
+		// 	log.Printf("Ignoring incoming block message for already downloaded block")
+		// 	return
+		// }
 
-		copy(download.data[b.blockByteOffset:], b.blockData)
-		download.numBlocksRecieved++
-		download.blocksRecieved[blockIndex] = true
+		// copy(download.data[b.blockByteOffset:], b.blockData)
+		// download.numBlocksRecieved++
+		// download.blocksRecieved[blockIndex] = true
 
-		// All blocks of piece have been downloaded
-		if download.numBlocksRecieved == download.numBlocksInPiece {
-			// Remove download from pending/outstanding downloads
-			p.removePieceDownloadByIndex(i)
-			// Check actual piece SHA1 against its expected value
-			pieceSHA1 := sha1.Sum(download.data)
-			if !bytes.Equal(pieceSHA1[:], download.sha1) {
-				log.Printf("peer %s: checksum of downloaded piece %d doesn't match\n", p.id, b.pieceIndex)
-				p.stop()
-				break
-			}
-			// Request to write piece to disk
-			p.toDiskChans.pieceWriteRequestChan <- &pieceWriteRequest{
-				pieceIndex: download.pieceIndex,
-				data:       download.data,
-			}
-		} else {
-			// TODO: requests sent that haven't been processed ?
-			//p.sendQueuedBlockRequests()
-		}
+		// // All blocks of piece have been downloaded
+		// if download.numBlocksRecieved == download.numBlocksInPiece {
+		// 	// Remove download from pending/outstanding downloads
+		// 	p.removePieceDownloadByIndex(i)
+		// 	// Check actual piece SHA1 against its expected value
+		// 	pieceSHA1 := sha1.Sum(download.data)
+		// 	if !bytes.Equal(pieceSHA1[:], download.sha1) {
+		// 		log.Printf("peer %s: checksum of downloaded piece %d doesn't match\n", p.id, b.pieceIndex)
+		// 		p.stop()
+		// 		break
+		// 	}
+		// 	// Request to write piece to disk
+		// 	p.toDiskChans.pieceWriteRequestChan <- &pieceWriteRequest{
+		// 		pieceIndex: download.pieceIndex,
+		// 		data:       download.data,
+		// 	}
+		// } else {
+		// 	// TODO: requests sent that haven't been processed ?
+		// 	//p.sendQueuedBlockRequests()
+		// }
 	case CANCEL:
 		brr := &blockReadRequest{}
 		binary.Read(payload, binary.BigEndian, &brr.pieceIndex)
@@ -290,8 +288,7 @@ func (p *peer) handleIncomingMessages() {
 }
 
 func newPeer(p *peer, torrent *Torrent, quit chan int,
-	toChokeChans *peerChokeChans,
-	toDiskChans *peerDiskChans) *peer {
+	toChokeChans *peerChokeChans) *peer {
 
 	return &peer{
 		id:           p.id,
@@ -302,10 +299,10 @@ func newPeer(p *peer, torrent *Torrent, quit chan int,
 		fromChokeChans: &chokePeerChans{
 			havePiece: make(chan []*havePiece),
 		},
-		toDiskChans: toDiskChans,
-		fromDiskChans: &diskPeerChans{
-			blockResponse: make(chan *block),
-		},
+		// toDiskChans: toDiskChans,
+		// fromDiskChans: &diskPeerChans{
+		// 	blockResponse: make(chan *block),
+		// },
 		clientBitfield:                 bitmap.New(torrent.numPieces),
 		downloads:                      make([]*pieceDownload, 0),
 		diskRequestCancellationChannel: make(map[string]chan int),

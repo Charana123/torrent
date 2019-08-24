@@ -24,31 +24,35 @@ func init() {
 }
 
 type Torrent struct {
-	metaInfo  *metaInfo
+	metaInfo  metaInfo
 	infoHash  []byte
 	numPieces int
 }
 
 type metaInfo struct {
-	Info struct {
-		PieceLength int `bencode:"piece length"`
-		Pieces      string
-		Private     int
-		Name        string
-		Length      int
-		Md5sum      string
-		Files       []struct {
-			Length int
-			Md5sum string
-			Path   []string
-		}
-	}
+	Info         info
 	Announce     string
 	AnnounceList [][]string `bencode:"announce-list"`
 	CreationDate int        `bencode:"creation date"`
 	Comment      string
 	CreatedBy    string `bencode:"created by"`
 	Encoding     string
+}
+
+type info struct {
+	PieceLength int `bencode:"piece length"`
+	Pieces      string
+	Private     int
+	Name        string
+	Length      int
+	Md5sum      string
+	Files       []file
+}
+
+type file struct {
+	Length int
+	Md5sum string
+	Path   []string
 }
 
 func NewTorrent(filename string) (*Torrent, error) {
@@ -74,16 +78,15 @@ func NewTorrent(filename string) (*Torrent, error) {
 
 	infoBencode := &bytes.Buffer{}
 	bencode.Marshal(infoBencode, infoMap)
-
 	infoHash := sha1.Sum(infoBencode.Bytes())
 	torrent.infoHash = infoHash[:]
-	torrent.numPieces = len(torrent.metaInfo.Info.Pieces) / 20
 
 	file.Seek(0, 0)
 	err = bencode.Unmarshal(file, &torrent.metaInfo)
 	if err != nil {
 		return nil, err
 	}
+	torrent.numPieces = len(torrent.metaInfo.Info.Pieces) / 20
 	return torrent, nil
 }
 
@@ -98,30 +101,25 @@ func (t *Torrent) Start(serverPeerMChans *serverPeerMChans, port int) chan int {
 	// the peer list to the peer manager, manager makes a connection or ignores
 
 	quit := make(chan int)
-	progressStats := &progressStats{}
-	trackerPeerMChans := &trackerPeerMChans{
-		peers: make(chan *peer),
-	}
-	peerDiskChans := &peerDiskChans{
-		blockReadRequestChan:  make(chan *blockReadRequest),
-		pieceWriteRequestChan: make(chan *pieceWriteRequest),
-	}
-	disk := newDisk(progressStats, peerDiskChans)
-	go disk.start()
-	tracker := newTracker(t, progressStats, quit, port, nil, trackerPeerMChans)
-	go tracker.start()
-	peerMChokeChans := &peerMChokeChans{
-		newPeer: make(chan *chokePeerChans),
-	}
-	peerChokeChans := &peerChokeChans{
-		clientChokeStateChan: make(chan *chokeState),
-		peerHaveMessagesChan: make(chan *peerHaveMessages),
-	}
-	peerM := newPeerManager(t, serverPeerMChans, trackerPeerMChans,
-		peerMChokeChans, peerChokeChans, peerDiskChans)
-	go peerM.start()
-	choke := newChoke(peerMChokeChans, peerChokeChans)
-	go choke.start()
+	// progressStats := &progressStats{}
+	// trackerPeerMChans := &trackerPeerMChans{
+	// 	peers: make(chan *peer),
+	// }
+	// disk := newDisk(t.metaInfo)
+	// tracker := newTracker(t, progressStats, quit, port, nil, trackerPeerMChans)
+	// go tracker.start()
+	// peerMChokeChans := &peerMChokeChans{
+	// 	newPeer: make(chan *chokePeerChans),
+	// }
+	// peerChokeChans := &peerChokeChans{
+	// 	clientChokeStateChan: make(chan *chokeState),
+	// 	peerHaveMessagesChan: make(chan *peerHaveMessages),
+	// }
+	// peerM := newPeerManager(t, serverPeerMChans, trackerPeerMChans,
+	// 	peerMChokeChans, peerChokeChans)
+	// go peerM.start()
+	// choke := newChoke(peerMChokeChans, peerChokeChans)
+	// go choke.start()
 	return quit
 }
 

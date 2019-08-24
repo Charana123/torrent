@@ -59,32 +59,19 @@ type havePiece struct {
 
 // ======== DISK ======================
 
-// Peer -> Disk
-type peerDiskChans struct {
-	blockReadRequestChan  chan *blockReadRequest
-	pieceWriteRequestChan chan *pieceWriteRequest
-}
-
 type blockReadRequest struct {
 	pieceIndex      int
 	blockByteOffset int
 	length          int
-	resp            chan *block
+}
+
+type blockReadResponse struct {
+	pieceIndex      int
+	blockByteOffset int
+	blockData       []byte
 }
 
 type pieceWriteRequest struct {
 	pieceIndex int
 	data       []byte
-	// response channel ?
-}
-
-// Disk -> Peer
-type diskPeerChans struct {
-	blockResponse chan *block
-}
-
-type block struct {
-	pieceIndex      int
-	blockByteOffset int
-	blockData       []byte
 }

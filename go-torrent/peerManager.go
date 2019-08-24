@@ -10,7 +10,6 @@ type peerManager struct {
 	trackerChans   *trackerPeerMChans
 	chokeChans     *peerMChokeChans
 	chokePeerChans *peerChokeChans
-	diskPeerChans  *peerDiskChans
 	peers          map[string]*peer
 	numPeers       int
 	maxPeers       int
@@ -22,8 +21,7 @@ func newPeerManager(
 	serverChans *serverPeerMChans,
 	trackerChans *trackerPeerMChans,
 	chokeChans *peerMChokeChans,
-	chokePeerChans *peerChokeChans,
-	diskPeerChans *peerDiskChans) *peerManager {
+	chokePeerChans *peerChokeChans) *peerManager {
 
 	pm := &peerManager{
 		torrent:        torrent,
@@ -31,7 +29,6 @@ func newPeerManager(
 		trackerChans:   trackerChans,
 		chokeChans:     chokeChans,
 		chokePeerChans: chokePeerChans,
-		diskPeerChans:  diskPeerChans,
 	}
 	return pm
 }
@@ -54,7 +51,6 @@ func (pm *peerManager) start() {
 				pm.torrent,
 				pm.quit,
 				pm.chokePeerChans,
-				pm.diskPeerChans,
 			)
 			// notify choke chan ?
 			// go func() { pm.chokeChans.newPeer <- fromChokeChans }()
