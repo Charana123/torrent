@@ -1,10 +1,5 @@
 package torrent
 
-// Server -> Peer Manager
-type serverPeerMChans struct {
-	peers chan *peer
-}
-
 type trackerStats struct {
 	leechers int32
 	seeders  int32
@@ -15,8 +10,6 @@ type trackerPeerMChans struct {
 	// peer data (remote ip and port) from tracker
 	peers chan *peer
 }
-
-//
 
 type progressStats struct {
 	uploaded   int

@@ -310,6 +310,11 @@ func newPeer(p *peer, torrent *Torrent, quit chan int,
 }
 
 func (p *peer) start() {
+	conn, err := net.Dial("tcp4", p.id)
+	if err != nil {
+		return
+	}
+	p.conn = conn
 
 	p.handshake()
 	p.updateBitField(<-p.fromChokeChans.havePiece)

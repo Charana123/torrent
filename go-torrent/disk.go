@@ -3,7 +3,6 @@ package torrent
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 	"log"
 	"os"
 	"strings"
@@ -131,9 +130,6 @@ func (d *disk) writePiece(fileIndex, offset int, data []byte) {
 			writeLen = len(data)
 		}
 		d.fileLocks[fileIndex].Lock()
-		fmt.Println("fileIndex:", fileIndex)
-		fmt.Println("len(data):", writeLen)
-		fmt.Println("offset:", offset)
 		_, err := d.files[fileIndex].WriteAt(data[:writeLen], int64(offset))
 		d.fileLocks[fileIndex].Unlock()
 		fail(err)

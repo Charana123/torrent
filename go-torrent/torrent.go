@@ -95,7 +95,7 @@ func (t *Torrent) ServePeers() {
 }
 
 // Start/Resume downloading/uploading torrent
-func (t *Torrent) Start(serverPeerMChans *serverPeerMChans, port int) chan int {
+func (t *Torrent) Start() chan int {
 
 	// Requests the peer list, spawns another process to send
 	// the peer list to the peer manager, manager makes a connection or ignores

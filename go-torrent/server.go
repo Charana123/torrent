@@ -3,52 +3,67 @@ package torrent
 import (
 	"log"
 	"net"
-	"time"
 )
 
-type Server struct {
-	port      int
-	listener  *net.TCPListener
-	peerMChan *serverPeerMChans
-	quit      chan int
+type server struct {
+	port     int
+	listener net.Listener
+	quit     chan int
+	pm       PeerManager
 }
+
+var (
+	listen = net.Listen
+)
 
 // give as input, the connection that sends peer connections to torrent
-func NewServer(quit chan int) (*Server, *serverPeerMChans, int, error) {
-	sv := &Server{
+func newServer(pm PeerManager, quit chan int) (*server, error) {
+	sv := &server{
+		pm:   pm,
 		quit: quit,
-		peerMChan: &serverPeerMChans{
-			peers: make(chan *peer),
-		},
 	}
 	var err error
-	sv.listener, err = net.ListenTCP("tcp4", &net.TCPAddr{})
+	sv.listener, err = listen("tcp4", "")
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, err
 	}
 	sv.port = sv.listener.Addr().(*net.TCPAddr).Port
-	return sv, sv.peerMChan, sv.port, nil
+	sv.serve()
+	return sv, nil
 }
 
-func (sv *Server) Serve() {
+func (sv *server) serve() {
 	go func() {
+		sig := make(chan int)
 		for {
-			select {
-			case <-sv.quit:
-				log.Println("Safely terminating peer listener")
-				return
-			default:
-				sv.listener.SetDeadline(time.Now().Add(time.Second))
-				conn, err := sv.listener.AcceptTCP()
+			go func() {
+				conn, err := sv.listener.Accept()
 				if err != nil {
-					log.Panicln("Error! Terminating peer listener, please restart")
+					// If connection was closed, stop goroutine
+					if neterr, ok := err.(net.Error); ok && neterr.Timeout() {
+						return
+					}
+					sig <- 1
 					return
 				}
 				peer := &peer{}
 				peer.conn = conn
 				peer.id = conn.RemoteAddr().String()
-				// Non-blocking
-				go func() { sv.peerMChan.peers <- peer }()
+				sv.pm.AddPeer(peer)
+				sig <- 0
+			}()
+
+			select {
+			case <-sv.quit:
+				sv.listener.Close()
+				log.Println("Safely terminating peer listener")
+				return
+			case c := <-sig:
+				if c == 1 {
+					log.Panicln("Error! Terminating peer listener, please restart")
+					return
+				}
+				continue
 			}
 		}
 	}()
