@@ -13,7 +13,6 @@ type mockListener struct {
 	mock.Mock
 }
 
-// addr -> accept -> accept -> close
 func (m *mockListener) Accept() (net.Conn, error) {
 	args := m.Called()
 	return args.Get(0).(net.Conn), args.Error(1)

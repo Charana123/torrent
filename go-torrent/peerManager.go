@@ -4,20 +4,25 @@ import "sync"
 
 type PeerManager interface {
 	AddPeer(*peer)
+	GetPeerList() []*PeerInfo
 }
 
-type PM struct {
-	torrent        *Torrent
+type peerManager struct {
+	sync.Mutex
+
+	// peer related
+	peers    map[string]*peer
+	numPeers int
+	maxPeers int
+
+	// channels
 	trackerChans   *trackerPeerMChans
 	chokeChans     *peerMChokeChans
 	chokePeerChans *peerChokeChans
 
-	peers    map[string]*peer
-	numPeers int
-	maxPeers int
-	peerLock *sync.Mutex
-
-	quit chan int
+	// other
+	torrent *Torrent
+	quit    chan int
 }
 
 func newPeerManager(
@@ -26,19 +31,30 @@ func newPeerManager(
 	chokeChans *peerMChokeChans,
 	chokePeerChans *peerChokeChans) PeerManager {
 
-	pm := &PM{
+	pm := &peerManager{
 		torrent:        torrent,
 		trackerChans:   trackerChans,
 		chokeChans:     chokeChans,
 		chokePeerChans: chokePeerChans,
-		peerLock:       &sync.Mutex{},
 	}
 	return pm
 }
 
-func (pm *PM) AddPeer(peer *peer) {
-	pm.peerLock.Lock()
-	defer pm.peerLock.Unlock()
+func (pm *peerManager) GetPeerList() []*PeerInfo {
+	peers := []*PeerInfo{}
+	for _, peer := range pm.peers {
+		pi := &PeerInfo{}
+		pi.id = peer.id
+		pi.state = peer.state
+
+		peers = append(peers, pi)
+	}
+	return peers
+}
+
+func (pm *peerManager) AddPeer(peer *peer) {
+	pm.Lock()
+	defer pm.Unlock()
 
 	if pm.numPeers > pm.maxPeers {
 		// Connected to too many peers
@@ -49,16 +65,22 @@ func (pm *PM) AddPeer(peer *peer) {
 		return
 	}
 
-	peer = newPeer(
-		peer,
-		pm.torrent,
-		pm.quit,
-		pm.chokePeerChans,
-	)
+	// peer = newPeer(
+	// 	peer,
+	// 	pm.torrent,
+	// 	pm.quit,
+	// 	pm.chokePeerChans,
+	// )
 	// notify choke chan ?
 	// go func() { pm.chokeChans.newPeer <- fromChokeChans }()
 
 	pm.peers[peer.id] = peer
 	pm.numPeers++
-	go peer.start()
+}
+
+func (pm *PM) DeletePeer(id string) {
+	pm.Lock()
+	defer pm.Unlock()
+	delete(pm.peers, id)
+	pm.numPeers--
 }
