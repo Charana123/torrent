@@ -14,13 +14,18 @@ import (
 var appFS = afero.NewOsFs()
 var openFile = appFS.OpenFile
 
+type Disk interface {
+	BlockReadRequest(pieceIndex, blockByteOffset, length int, resp chan *blockReadResponse)
+	WritePieceRequest(pieceIndex int, data []byte)
+}
+
 type disk struct {
 	metainfo  *metaInfo
 	files     []afero.File
 	fileLocks []*sync.Mutex
 }
 
-func newDisk(
+func NewDisk(
 	metainfo *metaInfo) *disk {
 
 	disk := &disk{
@@ -95,12 +100,12 @@ func (d *disk) readBlock(fileIndex, offset, length int) []byte {
 	return blockData.Bytes()
 }
 
-func (d *disk) BlockReadRequest(breq *blockReadRequest, resp chan *blockReadResponse) {
+func (d *disk) BlockReadRequest(pieceIndex, blockByteOffset, length int, resp chan *blockReadResponse) {
 	go func() {
-		offset := breq.pieceIndex*d.metainfo.Info.PieceLength + breq.blockByteOffset
+		offset := pieceIndex*d.metainfo.Info.PieceLength + blockByteOffset
 		bresp := &blockReadResponse{
-			pieceIndex:      breq.pieceIndex,
-			blockByteOffset: breq.blockByteOffset,
+			pieceIndex:      pieceIndex,
+			blockByteOffset: blockByteOffset,
 		}
 		if len(d.metainfo.Info.Files) > 0 {
 			// Multiple File Mode
@@ -108,13 +113,13 @@ func (d *disk) BlockReadRequest(breq *blockReadRequest, resp chan *blockReadResp
 				if offset >= d.metainfo.Info.Files[fileIndex].Length-1 {
 					offset -= d.metainfo.Info.Files[fileIndex].Length
 				} else {
-					bresp.blockData = d.readBlock(fileIndex, offset, breq.length)
+					bresp.blockData = d.readBlock(fileIndex, offset, length)
 					break
 				}
 			}
 		} else {
 			// Single File Mode
-			bresp.blockData = d.readBlock(0, offset, breq.length)
+			bresp.blockData = d.readBlock(0, offset, length)
 		}
 		resp <- bresp
 	}()
@@ -140,22 +145,22 @@ func (d *disk) writePiece(fileIndex, offset int, data []byte) {
 	}
 }
 
-func (d *disk) WritePieceRequest(preq *pieceWriteRequest) {
+func (d *disk) WritePieceRequest(pieceIndex int, data []byte) {
 	go func() {
-		offset := preq.pieceIndex * d.metainfo.Info.PieceLength
+		offset := pieceIndex * d.metainfo.Info.PieceLength
 		if len(d.metainfo.Info.Files) > 0 {
 			// Multiple File Mode
 			for fileIndex := 0; fileIndex < len(d.metainfo.Info.Files); fileIndex++ {
 				if offset >= d.metainfo.Info.Files[fileIndex].Length-1 {
 					offset -= d.metainfo.Info.Files[fileIndex].Length
 				} else {
-					d.writePiece(fileIndex, offset, preq.data)
+					d.writePiece(fileIndex, offset, data)
 					break
 				}
 			}
 		} else {
 			// Single File Mode
-			d.writePiece(0, offset, preq.data)
+			d.writePiece(0, offset, data)
 		}
 	}()
 }

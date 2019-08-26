@@ -3,44 +3,15 @@ package torrent
 import "sync"
 
 type PeerManager interface {
-	AddPeer(*peer)
+	AddPeer(peer *peer)
+	RemovePeer(id string)
 	GetPeerList() []*PeerInfo
 }
 
-type peerManager struct {
-	sync.Mutex
-
-	// peer related
-	peers    map[string]*peer
-	numPeers int
-	maxPeers int
-
-	// channels
-	trackerChans   *trackerPeerMChans
-	chokeChans     *peerMChokeChans
-	chokePeerChans *peerChokeChans
-
-	// other
-	torrent *Torrent
-	quit    chan int
-}
-
-func newPeerManager(
-	torrent *Torrent,
-	trackerChans *trackerPeerMChans,
-	chokeChans *peerMChokeChans,
-	chokePeerChans *peerChokeChans) PeerManager {
-
-	pm := &peerManager{
-		torrent:        torrent,
-		trackerChans:   trackerChans,
-		chokeChans:     chokeChans,
-		chokePeerChans: chokePeerChans,
-	}
-	return pm
-}
-
 func (pm *peerManager) GetPeerList() []*PeerInfo {
+	pm.RLock()
+	defer pm.RUnlock()
+
 	peers := []*PeerInfo{}
 	for _, peer := range pm.peers {
 		pi := &PeerInfo{}
@@ -81,9 +52,43 @@ func (pm *peerManager) AddPeer(peer *peer) {
 	pm.numPeers++
 }
 
-func (pm *peerManager) DeletePeer(id string) {
+func (pm *peerManager) RemovePeer(id string) {
 	pm.Lock()
 	defer pm.Unlock()
+
 	delete(pm.peers, id)
 	pm.numPeers--
+}
+
+type peerManager struct {
+	sync.RWMutex
+
+	// peer related
+	peers    map[string]*peer
+	numPeers int
+	maxPeers int
+
+	// channels
+	trackerChans   *trackerPeerMChans
+	chokeChans     *peerMChokeChans
+	chokePeerChans *peerChokeChans
+
+	// other
+	torrent *Torrent
+	quit    chan int
+}
+
+func NewPeerManager(
+	torrent *Torrent,
+	trackerChans *trackerPeerMChans,
+	chokeChans *peerMChokeChans,
+	chokePeerChans *peerChokeChans) PeerManager {
+
+	pm := &peerManager{
+		torrent:        torrent,
+		trackerChans:   trackerChans,
+		chokeChans:     chokeChans,
+		chokePeerChans: chokePeerChans,
+	}
+	return pm
 }

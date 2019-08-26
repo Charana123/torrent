@@ -23,9 +23,66 @@ const (
 )
 
 var (
-	CLIENT_BLOCK_REQUEST_LENGTH = 16384 // 2^14
-	BLOCK_READ_REQUEST_DELAY    = 5
+	BLOCK_READ_REQUEST_DELAY = 5
 )
+
+type Peer interface {
+	SendUnchoke()
+	SendChoke()
+	SendRequest(pieceIndex, blockIndex, length int)
+}
+
+func (p *peer) SendChoke() {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, int32(1))
+	binary.Write(b, binary.BigEndian, uint8(CHOKE))
+	p.sendMessage(b.Bytes())
+}
+
+func (p *peer) SendUnchoke() {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, int32(1))
+	binary.Write(b, binary.BigEndian, uint8(UNCHOKE))
+	p.sendMessage(b.Bytes())
+}
+
+func (p *peer) SendRequest(pieceIndex, blockIndex, length int) {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, int32(13))
+	binary.Write(b, binary.BigEndian, uint8(REQUEST))
+	binary.Write(b, binary.BigEndian, int32(pieceIndex))
+	binary.Write(b, binary.BigEndian, int32(blockIndex))
+	binary.Write(b, binary.BigEndian, int32(length))
+	p.sendMessage(b.Bytes())
+}
+
+func (p *peer) sendMessage(msg []byte) {
+	_, err := p.conn.Write(msg)
+	if err != nil {
+		p.stop()
+	}
+}
+
+type peer struct {
+	id                    string
+	state                 connState
+	conn                  net.Conn
+	torrent               *Torrent
+	quit                  chan int
+	disk                  *disk
+	peerMgr               PeerManager
+	pieceMgr              PieceManager
+	downloads             []*pieceDownload
+	readRequestCancelChan map[string]chan int
+	peerBitfield          bitmap.Bitmap
+}
+
+type connState struct {
+	peerInterested   bool
+	clientInterested bool
+	peerChoking      bool
+	clientChoking    bool
+}
 
 type pieceDownload struct {
 	pieceIndex        int
@@ -34,32 +91,6 @@ type pieceDownload struct {
 	blocksRecieved    []bool
 	data              []byte // block size * num blocks
 	sha1              []byte
-}
-
-type Peer interface {
-	SendUnchoke()
-	SendChoke()
-}
-
-type peer struct {
-	id      string
-	state   connState
-	conn    net.Conn
-	torrent *Torrent
-	quit    chan int
-	disk    *disk
-	// pieceMgr              PieceMgr
-	clientBitfield        bitmap.Bitmap
-	downloads             []*pieceDownload
-	readRequestCancelChan map[string]chan int
-	// peerBitfield   bitmap.Bitmap
-}
-
-type connState struct {
-	peerInterested   bool
-	clientInterested bool
-	peerChoking      bool
-	clientChoking    bool
 }
 
 func newPeer(
@@ -77,7 +108,6 @@ func newPeer(
 		torrent:               torrent,
 		quit:                  quit,
 		disk:                  disk,
-		clientBitfield:        clientBitField,
 		downloads:             make([]*pieceDownload, 0),
 		readRequestCancelChan: make(map[string]chan int),
 	}
@@ -85,27 +115,8 @@ func newPeer(
 	return peer
 }
 
-func (p *peer) SendChoke() {
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, uint8(CHOKE))
-	p.sendMessage(b.Bytes())
-}
-
-func (p *peer) SendUnchoke() {
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, uint8(UNCHOKE))
-	p.sendMessage(b.Bytes())
-}
-
-func (p *peer) sendMessage(msg []byte) {
-	_, err := p.conn.Write(msg)
-	if err != nil {
-		p.stop()
-	}
-}
-
 func (p *peer) stop() {
-	// TODO: remove peer from peer manager
+	p.peerMgr.RemovePeer(p.id)
 	fmt.Printf("peer %s: is being stopped\n", p.id)
 	close(p.quit)
 }
@@ -154,7 +165,7 @@ func (p *peer) start() {
 	}
 
 	// send bitfield
-	bitfield := p.clientBitfield.Data(false)
+	bitfield := p.pieceMgr.GetBitField()
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(1+len(bitfield)))
 	binary.Write(b, binary.BigEndian, uint8(BITFIELD))
@@ -174,7 +185,6 @@ func (p *peer) start() {
 }
 
 func (p *peer) decodeMessage(messageID byte, payload *bytes.Buffer) {
-	// TODO - maintain peer bitfield
 	switch messageID {
 	case CHOKE:
 		if !p.state.peerChoking {
