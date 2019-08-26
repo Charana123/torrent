@@ -11,7 +11,7 @@ import (
 )
 
 type rarestFirst struct {
-	sync.Mutex
+	sync.RWMutex
 	clientBitField bitmap.Bitmap
 	numPieces      int
 	numBlocks      int
@@ -21,10 +21,11 @@ type rarestFirst struct {
 }
 
 type pieceInfo struct {
-	downloaded     bool
-	downloading    bool
-	blocks         []*blockInfo
-	availablePeers int // peer with piece available
+	downloaded  bool
+	downloading bool
+	blocks      []*blockInfo
+	availabilty int
+	peers       []string
 }
 
 type blockInfo struct {
@@ -34,21 +35,36 @@ type blockInfo struct {
 }
 
 func (pm *rarestFirst) GetBitField() []byte {
-	pm.Lock()
-	defer pm.Unlock()
+	pm.RLock()
+	defer pm.RUnlock()
 
 	return pm.clientBitField.Data(true)
 }
 
-func (pm *rarestFirst) PeerStopped(id string) {
+func (pm *rarestFirst) PeerChoked(id string) {
 	pm.Lock()
 	defer pm.Unlock()
 
 	if pieceIndex, ok := pm.peerToPiece[id]; ok {
-		pi := &pieceInfo{}
-		pi.blocks = make([]*blockInfo, pm.numBlocks)
-		pi.availablePeers = pm.pieceInfo[pieceIndex].availablePeers
-		pm.pieceInfo[pieceIndex] = pi
+		pm.pieceInfo[pieceIndex].downloading = false
+		delete(pm.peerToPiece, id)
+	}
+}
+
+func (pm *rarestFirst) PeerStopped(id string, peerBitfield bitmap.Bitmap) {
+	pm.Lock()
+	defer pm.Unlock()
+
+	// Update piece availabilities
+	for pieceIndex := 0; pieceIndex < peerBitfield.Len(); pieceIndex++ {
+		if peerBitfield.Get(pieceIndex) {
+			pm.pieceInfo[pieceIndex].availabilty--
+		}
+	}
+
+	if pieceIndex, ok := pm.peerToPiece[id]; ok {
+		pm.pieceInfo[pieceIndex].downloading = false
+		delete(pm.peerToPiece, id)
 	}
 }
 
@@ -56,13 +72,14 @@ func (pm *rarestFirst) PieceHave(id string, pieceIndex int) {
 	pm.Lock()
 	defer pm.Unlock()
 
-	pm.pieceInfo[pieceIndex].availablePeers++
+	pm.pieceInfo[pieceIndex].availabilty++
 }
 
 func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []byte) error {
 	pm.Lock()
 	defer pm.Unlock()
 
+	// TODO: add more checks
 	// Check pieceIndex and blockIndex and set block as downloaded
 	if pi, ok := pm.peerToPiece[id]; !ok || pi != pieceIndex {
 		return fmt.Errorf("downloaded block from incorrent piece")
@@ -76,6 +93,9 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloaded = true
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading = false
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].data = data
+	if id != pm.pieceInfo[pieceIndex].peers[len(pm.pieceInfo[pieceIndex].peers)-1] {
+		pm.pieceInfo[pieceIndex].peers = append(pm.pieceInfo[pieceIndex].peers, id)
+	}
 
 	// If all blocks for piece are downloaded, set piece as downloaded
 	for i := len(pm.pieceInfo[pieceIndex].blocks); i >= 0; i-- {
@@ -93,6 +113,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	for _, block := range pm.pieceInfo[pieceIndex].blocks {
 		binary.Write(piece, binary.BigEndian, block.data)
 	}
+	// check sha1 checksum
 	pm.disk.WritePieceRequest(pieceIndex, piece.Bytes())
 
 	return nil
@@ -126,11 +147,12 @@ func (pm *rarestFirst) SendBlockRequests(id string, peer Peer, peerBitfield bitm
 		// sort them by rarity
 		sort.Slice(pieces, func(i, j int) bool {
 			p1, p2 := pieces[i], pieces[j]
-			return pm.pieceInfo[p1].availablePeers < pm.pieceInfo[p2].availablePeers
+			return pm.pieceInfo[p1].availabilty < pm.pieceInfo[p2].availabilty
 		})
 
-		pieceIndex = pieces[0]
 		pm.peerToPiece[id] = pieceIndex
+		pm.pieceInfo[pieceIndex].downloading = true
+		pieceIndex = pieces[0]
 		blocks = MAX_OUTSTANDING_REQUESTS
 	}
 

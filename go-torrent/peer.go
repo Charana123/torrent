@@ -4,22 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"log"
 	"net"
+	"strconv"
+	"time"
 
 	bitmap "github.com/boljen/go-bitmap"
-)
-
-const (
-	CHOKE          = 0
-	UNCHOKE        = 1
-	INTERESTED     = 2
-	NOT_INTERESTED = 3
-	HAVE           = 4
-	BITFIELD       = 5
-	REQUEST        = 6
-	BLOCK          = 7
-	CANCEL         = 8
-	PORT           = 9
 )
 
 var (
@@ -27,40 +17,16 @@ var (
 )
 
 type Peer interface {
-	SendUnchoke()
-	SendChoke()
-	SendRequest(pieceIndex, blockIndex, length int)
+	Stop()
 }
 
-func (p *peer) SendChoke() {
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, int32(1))
-	binary.Write(b, binary.BigEndian, uint8(CHOKE))
-	p.sendMessage(b.Bytes())
-}
-
-func (p *peer) SendUnchoke() {
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, int32(1))
-	binary.Write(b, binary.BigEndian, uint8(UNCHOKE))
-	p.sendMessage(b.Bytes())
-}
-
-func (p *peer) SendRequest(pieceIndex, blockIndex, length int) {
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, int32(13))
-	binary.Write(b, binary.BigEndian, uint8(REQUEST))
-	binary.Write(b, binary.BigEndian, int32(pieceIndex))
-	binary.Write(b, binary.BigEndian, int32(blockIndex))
-	binary.Write(b, binary.BigEndian, int32(length))
-	p.sendMessage(b.Bytes())
-}
-
-func (p *peer) sendMessage(msg []byte) {
-	_, err := p.conn.Write(msg)
-	if err != nil {
-		p.stop()
-	}
+func (p *peer) Stop() {
+	go func() {
+		p.peerMgr.RemovePeer(p.id)
+		p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
+	}()
+	fmt.Printf("peer %s: is being stopped\n", p.id)
+	close(p.quit)
 }
 
 type peer struct {
@@ -70,6 +36,7 @@ type peer struct {
 	torrent               *Torrent
 	quit                  chan int
 	disk                  *disk
+	wire                  Wire
 	peerMgr               PeerManager
 	pieceMgr              PieceManager
 	downloads             []*pieceDownload
@@ -115,12 +82,6 @@ func newPeer(
 	return peer
 }
 
-func (p *peer) stop() {
-	p.peerMgr.RemovePeer(p.id)
-	fmt.Printf("peer %s: is being stopped\n", p.id)
-	close(p.quit)
-}
-
 func (p *peer) start() {
 	if p.conn == nil {
 		conn, err := net.Dial("tcp4", p.id)
@@ -146,7 +107,7 @@ func (p *peer) start() {
 	copy(hreq.PeerID[:], PEER_ID)
 	err := binary.Write(p.conn, binary.BigEndian, hreq)
 	if err != nil {
-		p.stop()
+		p.Stop()
 		return
 	}
 
@@ -154,28 +115,28 @@ func (p *peer) start() {
 	hresp := &handshake{}
 	err = binary.Read(p.conn, binary.BigEndian, hresp)
 	if err != nil {
-		p.stop()
+		p.Stop()
 		return
 	}
 	if hresp.Len != 19 ||
 		!bytes.Equal(hresp.InfoHash[:], p.torrent.infoHash) ||
 		!bytes.Equal(hresp.Protocol[:], []byte("BitTorrent protocol")) {
-		p.stop()
+		p.Stop()
 		return
 	}
 
 	// send bitfield
 	bitfield := p.pieceMgr.GetBitField()
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, int32(1+len(bitfield)))
-	binary.Write(b, binary.BigEndian, uint8(BITFIELD))
-	binary.Write(b, binary.BigEndian, bitfield)
-	p.sendMessage(b.Bytes())
+	p.wire.SendBitField(bitfield)
 
 	// handle all subsequent messages
 	for {
-		var length int64
+		var length int
 		binary.Read(p.conn, binary.BigEndian, &length)
+		if length == 0 {
+			// keep-alive message
+			continue
+		}
 		var ID byte
 		binary.Read(p.conn, binary.BigEndian, &ID)
 		payload := make([]byte, length-1)
@@ -189,154 +150,122 @@ func (p *peer) decodeMessage(messageID byte, payload *bytes.Buffer) {
 	case CHOKE:
 		if !p.state.peerChoking {
 			p.state.peerChoking = true
-			// go func() {
-			// 	p.toChokeChans.clientChokeStateChan <- &chokeState{
-			// 		peerID:   p.id,
-			// 		isChoked: true,
-			// 	}
-			// }()
-			// TODO - Choke Controller should eliminate pending requests
-			// 	// clear unfinished work
+			go func() {
+				p.pieceMgr.PeerChoked(p.id)
+			}()
 		}
 	case UNCHOKE:
 		if p.state.peerChoking {
 			p.state.peerChoking = false
-			// go func() {
-			// 	p.toChokeChans.clientChokeStateChan <- &chokeState{
-			// 		peerID:   p.id,
-			// 		isChoked: false,
-			// 	}
-			// }()
+			go func() {
+				p.pieceMgr.SendBlockRequests(p.id, p, p.peerBitfield)
+			}()
 		}
 	case INTERESTED:
 		p.state.peerInterested = true
-		// p.sendUnchoke()
-		// p.connState.peerChoked = false
 	case NOT_INTERESTED:
 		p.state.peerInterested = false
-		// p.sendChoke()
-		// p.connState.peerChoked = true
 	case HAVE:
-		// var pieceIndex int
-		// binary.Read(payload, binary.BigEndian, &pieceIndex)
+		var pieceIndex int
+		binary.Read(payload, binary.BigEndian, &pieceIndex)
+		go func() {
+			p.pieceMgr.PieceHave(p.id, pieceIndex)
+		}()
+		p.peerBitfield.Set(pieceIndex, true)
 
-		// go func() {
-		// 	p.toChokeChans.peerHaveMessagesChan <- &peerHaveMessages{
-		// 		peerID:       p.id,
-		// 		pieceIndices: []int{pieceIndex}}
-		// }()
+		// If client doesn't have piece, become interested
+		if bitmap.Get(p.pieceMgr.GetBitField(), pieceIndex) {
+			if !p.state.clientInterested {
+				p.state.clientInterested = true
+				p.wire.SendInterested()
+			}
+
+		}
 	case BITFIELD:
-		// peerHaveMessages := &peerHaveMessages{}
-		// peerHaveMessages.peerID = p.id
+		peerBitfield := payload.Bytes()
+		p.peerBitfield = bitmap.New(p.torrent.numPieces)
+		for pieceIndex := 0; pieceIndex < p.torrent.numPieces; pieceIndex++ {
+			havePiece := bitmap.Get(peerBitfield, pieceIndex)
+			p.peerBitfield.Set(pieceIndex, havePiece)
+		}
 
-		// peerBitfield := payload.Bytes()
-		// for pieceIndex := 0; pieceIndex < p.torrent.numPieces; pieceIndex++ {
-		// 	havePiece := bitmap.Get(peerBitfield, pieceIndex)
-		// 	if havePiece {
-		// 		peerHaveMessages.pieceIndices = append(peerHaveMessages.pieceIndices, pieceIndex)
-		// 	}
-		// }
-		// go func() { p.toChokeChans.peerHaveMessagesChan <- peerHaveMessages }()
+		// If client doesn't have piece in peer bitfield, become interested
+		clientBitField := p.pieceMgr.GetBitField()
+		for pieceIndex := 0; pieceIndex < p.peerBitfield.Len(); pieceIndex++ {
+			if p.peerBitfield.Get(pieceIndex) {
+				if !bitmap.Get(clientBitField, pieceIndex) {
+					p.state.clientInterested = true
+					break
+				}
+			}
+		}
 	case REQUEST:
-		// brr := &blockReadRequest{}
-		// binary.Read(payload, binary.BigEndian, &brr.pieceIndex)
-		// binary.Read(payload, binary.BigEndian, &brr.blockByteOffset)
-		// binary.Read(payload, binary.BigEndian, &brr.length)
-		//brr.resp = p.fromDiskChans.blockResponse
+		if !p.state.clientChoking && p.state.peerInterested {
+			var pieceIndex int
+			binary.Read(payload, binary.BigEndian, &pieceIndex)
+			var blockByteOffset int
+			binary.Read(payload, binary.BigEndian, &blockByteOffset)
+			var length int
+			binary.Read(payload, binary.BigEndian, &length)
 
-		// requestID := strconv.Itoa(brr.pieceIndex) + strconv.Itoa(brr.blockByteOffset) + strconv.Itoa(brr.length)
-		// quit := make(chan int)
-		// go func() {
-		// 	select {
-		// 	case <-quit:
-		// 		return
-		// 	case <-time.After(BLOCK_READ_REQUEST_DELAY):
-		// 		p.diskRequestCancellationChannel[requestID] = nil
-		// 		p.toDiskChans.blockReadRequestChan <- brr
-		// 	}
-		// }()
-		// p.diskRequestCancellationChannel[requestID] = quit
-
+			requestID := strconv.Itoa(pieceIndex) + strconv.Itoa(blockByteOffset) + strconv.Itoa(length)
+			quit := make(chan int)
+			go func() {
+				select {
+				case <-quit:
+					return
+				case <-time.After(time.Duration(BLOCK_READ_REQUEST_DELAY) * time.Second):
+					delete(p.readRequestCancelChan, requestID)
+					block, err := p.disk.BlockReadRequest(pieceIndex, blockByteOffset, length)
+					if err != nil {
+						fmt.Println("invalid block request from peer")
+						p.Stop()
+					}
+					p.wire.SendBlock(pieceIndex, blockByteOffset, block)
+				}
+			}()
+			p.readRequestCancelChan[requestID] = quit
+		} else {
+			log.Println("peer sent request when client was choking or peer wasn't interested")
+			p.Stop()
+			return
+		}
 	case BLOCK:
-		// b := &block{}
-		// binary.Read(payload, binary.BigEndian, b.pieceIndex)
-		// binary.Read(payload, binary.BigEndian, b.blockByteOffset)
-		// binary.Read(payload, binary.BigEndian, b.blockData)
+		var pieceIndex int
+		binary.Read(payload, binary.BigEndian, pieceIndex)
+		var blockByteOffset int
+		binary.Read(payload, binary.BigEndian, blockByteOffset)
+		var blockData []byte
+		binary.Read(payload, binary.BigEndian, blockData)
 
-		// download, i := p.getPieceDownload(b.pieceIndex)
-		// blockIndex := b.blockByteOffset / CLIENT_BLOCK_REQUEST_LENGTH
-
-		// if download == nil {
-		// 	log.Printf("Ignoring incoming block message for piece not being downloaded")
-		// 	return
-		// } else if b.blockByteOffset%CLIENT_BLOCK_REQUEST_LENGTH != 0 ||
-		// 	blockIndex > 0 || blockIndex < 10 {
-		// 	log.Printf("Illegal block byte offset within piece")
-		// 	p.stop()
-		// 	return
-		// } else if download.blocksRecieved[blockIndex] {
-		// 	log.Printf("Ignoring incoming block message for already downloaded block")
-		// 	return
-		// }
-
-		// copy(download.data[b.blockByteOffset:], b.blockData)
-		// download.numBlocksRecieved++
-		// download.blocksRecieved[blockIndex] = true
-
-		// // All blocks of piece have been downloaded
-		// if download.numBlocksRecieved == download.numBlocksInPiece {
-		// 	// Remove download from pending/outstanding downloads
-		// 	p.removePieceDownloadByIndex(i)
-		// 	// Check actual piece SHA1 against its expected value
-		// 	pieceSHA1 := sha1.Sum(download.data)
-		// 	if !bytes.Equal(pieceSHA1[:], download.sha1) {
-		// 		log.Printf("peer %s: checksum of downloaded piece %d doesn't match\n", p.id, b.pieceIndex)
-		// 		p.stop()
-		// 		break
-		// 	}
-		// 	// Request to write piece to disk
-		// 	p.toDiskChans.pieceWriteRequestChan <- &pieceWriteRequest{
-		// 		pieceIndex: download.pieceIndex,
-		// 		data:       download.data,
-		// 	}
-		// } else {
-		// 	// TODO: requests sent that haven't been processed ?
-		// 	//p.sendQueuedBlockRequests()
-		// }
+		blockIndex := blockByteOffset / BLOCK_SIZE
+		go func() {
+			err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
+			if err != nil {
+				log.Println(err)
+				p.Stop()
+			}
+			p.pieceMgr.SendBlockRequests(p.id, p, p.peerBitfield)
+		}()
 	case CANCEL:
-		// brr := &blockReadRequest{}
-		// binary.Read(payload, binary.BigEndian, &brr.pieceIndex)
-		// binary.Read(payload, binary.BigEndian, &brr.blockByteOffset)
-		// binary.Read(payload, binary.BigEndian, &brr.length)
-		// requestID := strconv.Itoa(brr.pieceIndex) + strconv.Itoa(brr.blockByteOffset) + strconv.Itoa(brr.length)
-		// quitC := p.diskRequestCancellationChannel[requestID]
-		// if quitC != nil {
-		// 	close(quitC)
-		// }
+		if !p.state.clientChoking && p.state.peerInterested {
+			var pieceIndex int
+			binary.Read(payload, binary.BigEndian, &pieceIndex)
+			var blockByteOffset int
+			binary.Read(payload, binary.BigEndian, &blockByteOffset)
+			var length int
+			binary.Read(payload, binary.BigEndian, &length)
+
+			requestID := strconv.Itoa(pieceIndex) + strconv.Itoa(blockByteOffset) + strconv.Itoa(length)
+			if quitC, ok := p.readRequestCancelChan[requestID]; ok {
+				close(quitC)
+			}
+		} else {
+			log.Println("peer sent cancel when client was choking or peer wasn't interested")
+			p.Stop()
+			return
+		}
 	case PORT:
 		// TODO: DHT (BEP 0005)
-	}
-}
-
-func (p *peer) getPieceDownload(pieceIndex int) (*pieceDownload, int) {
-	for i, pieceDownload := range p.downloads {
-		if pieceIndex == pieceDownload.pieceIndex {
-			return pieceDownload, i
-		}
-	}
-	return nil, 0
-}
-
-func (p *peer) removePieceDownloadByIndex(i int) {
-	p.downloads = append(p.downloads[:i], p.downloads[i+1:]...)
-}
-
-func (p *peer) sendBitfield() {
-
-}
-
-func (p *peer) updateBitField(havePieces []*havePiece) {
-	for _, havePiece := range havePieces {
-		p.clientBitfield.Set(havePiece.pieceIndex, true)
 	}
 }

@@ -77,7 +77,7 @@ func (d *disk) init() {
 	}
 }
 
-func (d *disk) readBlock(fileIndex, offset, length int) []byte {
+func (d *disk) readBlock(fileIndex, offset, length int) ([]byte, error) {
 
 	blockData := &bytes.Buffer{}
 	for length > 0 {
@@ -90,42 +90,43 @@ func (d *disk) readBlock(fileIndex, offset, length int) []byte {
 		d.fileLocks[fileIndex].Lock()
 		_, err := d.files[fileIndex].ReadAt(data, int64(offset))
 		d.fileLocks[fileIndex].Unlock()
-		fail(err)
+		if err != nil {
+			return nil, err
+		}
 
 		binary.Write(blockData, binary.BigEndian, data)
 		length = length - (d.metainfo.Info.Files[fileIndex].Length - offset)
 		offset = 0
 		fileIndex++
 	}
-	return blockData.Bytes()
+	return blockData.Bytes(), nil
 }
 
-func (d *disk) BlockReadRequest(pieceIndex, blockByteOffset, length int, resp chan *blockReadResponse) {
-	go func() {
-		offset := pieceIndex*d.metainfo.Info.PieceLength + blockByteOffset
-		bresp := &blockReadResponse{
-			pieceIndex:      pieceIndex,
-			blockByteOffset: blockByteOffset,
-		}
-		if len(d.metainfo.Info.Files) > 0 {
-			// Multiple File Mode
-			for fileIndex := 0; fileIndex < len(d.metainfo.Info.Files); fileIndex++ {
-				if offset >= d.metainfo.Info.Files[fileIndex].Length-1 {
-					offset -= d.metainfo.Info.Files[fileIndex].Length
-				} else {
-					bresp.blockData = d.readBlock(fileIndex, offset, length)
-					break
-				}
+func (d *disk) BlockReadRequest(pieceIndex, blockByteOffset, length int) ([]byte, error) {
+	offset := pieceIndex*d.metainfo.Info.PieceLength + blockByteOffset
+	var err error
+	var block []byte
+	if len(d.metainfo.Info.Files) > 0 {
+		// Multiple File Mode
+		for fileIndex := 0; fileIndex < len(d.metainfo.Info.Files); fileIndex++ {
+			if offset >= d.metainfo.Info.Files[fileIndex].Length-1 {
+				offset -= d.metainfo.Info.Files[fileIndex].Length
+			} else {
+				block, err := d.readBlock(fileIndex, offset, length)
+				break
 			}
-		} else {
-			// Single File Mode
-			bresp.blockData = d.readBlock(0, offset, length)
 		}
-		resp <- bresp
-	}()
+	} else {
+		// Single File Mode
+		block, err := d.readBlock(0, offset, length)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return block, nil
 }
 
-func (d *disk) writePiece(fileIndex, offset int, data []byte) {
+func (d *disk) writePiece(fileIndex, offset int, data []byte) error {
 
 	for len(data) > 0 {
 		var writeLen int
@@ -137,30 +138,35 @@ func (d *disk) writePiece(fileIndex, offset int, data []byte) {
 		d.fileLocks[fileIndex].Lock()
 		_, err := d.files[fileIndex].WriteAt(data[:writeLen], int64(offset))
 		d.fileLocks[fileIndex].Unlock()
-		fail(err)
+		if err != nil {
+			return err
+		}
 
 		data = data[writeLen:]
 		offset = 0
 		fileIndex++
 	}
+	return nil
 }
 
-func (d *disk) WritePieceRequest(pieceIndex int, data []byte) {
-	go func() {
-		offset := pieceIndex * d.metainfo.Info.PieceLength
-		if len(d.metainfo.Info.Files) > 0 {
-			// Multiple File Mode
-			for fileIndex := 0; fileIndex < len(d.metainfo.Info.Files); fileIndex++ {
-				if offset >= d.metainfo.Info.Files[fileIndex].Length-1 {
-					offset -= d.metainfo.Info.Files[fileIndex].Length
-				} else {
-					d.writePiece(fileIndex, offset, data)
-					break
-				}
+func (d *disk) WritePieceRequest(pieceIndex int, data []byte) error {
+	offset := pieceIndex * d.metainfo.Info.PieceLength
+	var err error
+	if len(d.metainfo.Info.Files) > 0 {
+		// Multiple File Mode
+		for fileIndex := 0; fileIndex < len(d.metainfo.Info.Files); fileIndex++ {
+			if offset >= d.metainfo.Info.Files[fileIndex].Length-1 {
+				offset -= d.metainfo.Info.Files[fileIndex].Length
+			} else {
+				err = d.writePiece(fileIndex, offset, data)
 			}
-		} else {
-			// Single File Mode
-			d.writePiece(0, offset, data)
 		}
-	}()
+	} else {
+		// Single File Mode
+		err = d.writePiece(0, offset, data)
+	}
+	if err != nil {
+		return err
+	}
+	return nil
 }
