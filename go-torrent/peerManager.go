@@ -46,6 +46,9 @@ func (pm *peerManager) GetPeerList() []*PeerInfo {
 		pi := &PeerInfo{}
 		pi.id = peer.id
 		pi.state = peer.state
+		pi.peer = peer
+		pi.lastPiece = 0 // TODO
+		pi.speed = 0     // TODO
 
 		peers = append(peers, pi)
 	}
@@ -78,7 +81,7 @@ func (pm *peerManager) AddPeer(peer *peer) {
 	pm.numPeers++
 }
 
-func (pm *PM) DeletePeer(id string) {
+func (pm *peerManager) DeletePeer(id string) {
 	pm.Lock()
 	defer pm.Unlock()
 	delete(pm.peers, id)

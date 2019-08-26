@@ -36,14 +36,14 @@ type pieceDownload struct {
 	sha1              []byte
 }
 
+type Peer interface {
+	SendUnchoke()
+	SendChoke()
+}
+
 type peer struct {
-	id    string
-	state struct {
-		peerInterested   bool
-		clientInterested bool
-		peerChoking      bool
-		clientChoking    bool
-	}
+	id      string
+	state   connState
 	conn    net.Conn
 	torrent *Torrent
 	quit    chan int
@@ -53,6 +53,13 @@ type peer struct {
 	downloads             []*pieceDownload
 	readRequestCancelChan map[string]chan int
 	// peerBitfield   bitmap.Bitmap
+}
+
+type connState struct {
+	peerInterested   bool
+	clientInterested bool
+	peerChoking      bool
+	clientChoking    bool
 }
 
 func newPeer(
@@ -76,6 +83,25 @@ func newPeer(
 	}
 	go peer.start()
 	return peer
+}
+
+func (p *peer) SendChoke() {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, uint8(CHOKE))
+	p.sendMessage(b.Bytes())
+}
+
+func (p *peer) SendUnchoke() {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, uint8(UNCHOKE))
+	p.sendMessage(b.Bytes())
+}
+
+func (p *peer) sendMessage(msg []byte) {
+	_, err := p.conn.Write(msg)
+	if err != nil {
+		p.stop()
+	}
 }
 
 func (p *peer) stop() {
@@ -297,25 +323,6 @@ func (p *peer) removePieceDownloadByIndex(i int) {
 
 func (p *peer) sendBitfield() {
 
-}
-
-func (p *peer) sendChoke() {
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, uint8(CHOKE))
-	p.sendMessage(b.Bytes())
-}
-
-func (p *peer) sendUnchoke() {
-	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, uint8(UNCHOKE))
-	p.sendMessage(b.Bytes())
-}
-
-func (p *peer) sendMessage(msg []byte) {
-	n, err := p.conn.Write(msg)
-	if err != nil {
-		p.stop()
-	}
 }
 
 func (p *peer) updateBitField(havePieces []*havePiece) {
