@@ -20,33 +20,32 @@ var (
 	BLOCK_READ_REQUEST_DELAY = 5
 )
 
-var dial = net.Dial
-
 type Peer interface {
 	Stop()
 }
+
+var newWire = wire.NewWire
 
 func (p *peer) Stop() {
 	go func() {
 		p.peerMgr.RemovePeer(p.id)
 		p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
 	}()
-	fmt.Printf("peer %s: is being stopped\n", p.id)
-	close(p.quit)
+	p.closed = true
+	p.wire.Close()
 }
 
 type peer struct {
 	id                    string
 	state                 connState
-	conn                  net.Conn
+	closed                bool
 	disk                  disk.Disk
 	torrent               *torrent.Torrent
-	quit                  chan int
 	wire                  wire.Wire
 	peerMgr               PeerManager
 	pieceMgr              piece.PieceManager
 	readRequestCancelChan map[string]chan int
-	peerBitfield          bitmap.Bitmap
+	peerBitfield          *bitmap.Bitmap
 }
 
 type connState struct {
@@ -56,21 +55,19 @@ type connState struct {
 	clientChoking    bool
 }
 
-func newPeer(
+func NewPeer(
 	id string,
-	conn net.Conn,
-	disk disk.Disk,
+	wire wire.Wire,
 	torrent *torrent.Torrent,
-	quit chan int,
+	disk disk.Disk,
 	peerMgr PeerManager,
 	pieceMgr piece.PieceManager) *peer {
 
 	peer := &peer{
 		id:                    id,
-		conn:                  conn,
-		disk:                  disk,
+		wire:                  wire,
 		torrent:               torrent,
-		quit:                  quit,
+		disk:                  disk,
 		peerMgr:               peerMgr,
 		pieceMgr:              pieceMgr,
 		readRequestCancelChan: make(map[string]chan int),
@@ -80,69 +77,64 @@ func newPeer(
 }
 
 func (p *peer) start() {
-	if p.conn == nil {
-		conn, err := dial("tcp4", p.id)
+	if p.wire == nil {
+		conn, err := net.Dial("tcp4", p.id)
 		if err != nil {
+			p.Stop()
 			return
 		}
-		p.conn = conn
-	}
-
-	type handshake struct {
-		Len      uint8
-		Protocol [19]byte
-		Reserved [8]uint8
-		InfoHash [20]byte
-		PeerID   [20]byte
+		p.wire = newWire(conn)
 	}
 
 	// send handshake
-	hreq := &handshake{}
-	hreq.Len = 19
-	copy(hreq.Protocol[:], "BitTorrent protocol")
-	copy(hreq.InfoHash[:], p.torrent.InfoHash)
-	copy(hreq.PeerID[:], torrent.PEER_ID)
-	err := binary.Write(p.conn, binary.BigEndian, hreq)
-	if err != nil {
+	err1 := p.wire.SendHandshake(19, "BitTorrent protocol", p.torrent.InfoHash, torrent.PEER_ID)
+	if !p.closed && err1 != nil {
 		p.Stop()
+		fmt.Println("one")
 		return
 	}
 
 	// recieve handshake
-	hresp := &handshake{}
-	err = binary.Read(p.conn, binary.BigEndian, hresp)
-	if err != nil {
+	length, protocol, infoHash, _, err2 := p.wire.ReadHandshake()
+	if length != 19 ||
+		protocol != "BitTorrent protocol" ||
+		!bytes.Equal(infoHash, p.torrent.InfoHash) {
+		fmt.Println("one1")
 		p.Stop()
 		return
 	}
-	if hresp.Len != 19 ||
-		!bytes.Equal(hresp.InfoHash[:], p.torrent.InfoHash) ||
-		!bytes.Equal(hresp.Protocol[:], []byte("BitTorrent protocol")) {
+	if !p.closed && err2 != nil {
+		fmt.Println("one2")
 		p.Stop()
 		return
 	}
 
 	// send bitfield
 	bitfield := p.pieceMgr.GetBitField()
-	p.wire.SendBitField(bitfield)
+	err3 := p.wire.SendBitField(bitfield)
+	if !p.closed && err3 != nil {
+		p.Stop()
+		fmt.Println("one3")
+		return
+	}
 
 	// handle all subsequent messages
 	for {
-		var length int
-		binary.Read(p.conn, binary.BigEndian, &length)
+		length, messageID, payload, err := p.wire.ReadMessage()
+		if !p.closed && err != nil {
+			fmt.Println("one4")
+			p.Stop()
+			return
+		}
 		if length == 0 {
 			// keep-alive message
 			continue
 		}
-		var ID byte
-		binary.Read(p.conn, binary.BigEndian, &ID)
-		payload := make([]byte, length-1)
-		binary.Read(p.conn, binary.BigEndian, &payload)
-		p.decodeMessage(ID, bytes.NewBuffer(payload))
+		p.decodeMessage(messageID, bytes.NewBuffer(payload))
 	}
 }
 
-func (p *peer) decodeMessage(messageID byte, payload *bytes.Buffer) {
+func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
 	case wire.CHOKE:
 		if !p.state.peerChoking {
@@ -178,8 +170,10 @@ func (p *peer) decodeMessage(messageID byte, payload *bytes.Buffer) {
 			}
 		}
 	case wire.BITFIELD:
+
 		peerBitfield := payload.Bytes()
-		p.peerBitfield = bitmap.New(p.torrent.NumPieces)
+		bitfield := bitmap.New(p.torrent.NumPieces)
+		p.peerBitfield = &bitfield
 		for pieceIndex := 0; pieceIndex < p.torrent.NumPieces; pieceIndex++ {
 			havePiece := bitmap.Get(peerBitfield, pieceIndex)
 			p.peerBitfield.Set(pieceIndex, havePiece)

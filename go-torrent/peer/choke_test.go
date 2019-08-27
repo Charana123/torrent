@@ -6,15 +6,15 @@ import (
 	"github.com/stretchr/testify/mock"
 )
 
-type mockPeerManager struct {
-	PeerManager
-	mock.Mock
-}
+// type mockPeerManager struct {
+// 	PeerManager
+// 	mock.Mock
+// }
 
-func (m *mockPeerManager) GetPeerList() []*PeerInfo {
-	args := m.Called()
-	return args.Get(0).([]*PeerInfo)
-}
+// func (m *mockPeerManager) GetPeerList() []*PeerInfo {
+// 	args := m.Called()
+// 	return args.Get(0).([]*PeerInfo)
+// }
 
 type mockPeer struct {
 	Peer

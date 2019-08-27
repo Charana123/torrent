@@ -54,7 +54,7 @@ func (pm *rarestFirst) PeerChoked(id string) {
 	}
 }
 
-func (pm *rarestFirst) PeerStopped(id string, peerBitfield bitmap.Bitmap) {
+func (pm *rarestFirst) PeerStopped(id string, peerBitfield *bitmap.Bitmap) {
 	pm.Lock()
 	defer pm.Unlock()
 
@@ -122,7 +122,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	return nil
 }
 
-func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield bitmap.Bitmap) {
+func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) {
 	pm.Lock()
 	defer pm.Unlock()
 
