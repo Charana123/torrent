@@ -7,6 +7,15 @@ import (
 	"github.com/Charana123/torrent/go-torrent/peer"
 )
 
+type Server interface {
+	GetServerPort() int
+	Serve()
+}
+
+func (sv *server) GetServerPort() int {
+	return sv.port
+}
+
 type server struct {
 	port     int
 	listener net.Listener
@@ -19,9 +28,9 @@ var (
 )
 
 // give as input, the connection that sends peer connections to torrent
-func newServer(
+func NewServer(
 	pm peer.PeerManager,
-	quit chan int) (*server, error) {
+	quit chan int) (Server, error) {
 
 	sv := &server{
 		pm:   pm,
@@ -33,11 +42,10 @@ func newServer(
 		return nil, err
 	}
 	sv.port = sv.listener.Addr().(*net.TCPAddr).Port
-	sv.serve()
 	return sv, nil
 }
 
-func (sv *server) serve() {
+func (sv *server) Serve() {
 	go func() {
 		sig := make(chan int)
 		for {

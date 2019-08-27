@@ -1,4 +1,4 @@
-package torrent
+package tracker
 
 import (
 	"fmt"
@@ -20,6 +20,7 @@ const (
 )
 
 type Tracker interface {
+	Start()
 }
 
 type tracker struct {
@@ -28,7 +29,7 @@ type tracker struct {
 	stats        stats.Stats
 	quit         chan int
 	serverPort   int
-	clientIP     *net.IP
+	clientIP     net.IP
 	key          int32
 	numwant      int32
 	announceResp struct {
@@ -49,7 +50,7 @@ func NewTracker(
 	torrent *torrent.Torrent,
 	quit chan int,
 	serverPort int,
-	clientIP *net.IP) Tracker {
+	clientIP net.IP) Tracker {
 
 	tr := &tracker{
 		torrent:    torrent,
@@ -59,7 +60,6 @@ func NewTracker(
 		key:        genKey(),
 		numwant:    50,
 	}
-	go tr.start()
 	return tr
 }
 
@@ -88,7 +88,7 @@ func (tr *tracker) announceTracker(trackerURL string) error {
 	}
 }
 
-func (tr *tracker) start() {
+func (tr *tracker) Start() {
 	for {
 		if len(tr.torrent.MetaInfo.AnnounceList) > 0 {
 			for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
