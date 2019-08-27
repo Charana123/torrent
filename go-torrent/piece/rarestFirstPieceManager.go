@@ -2,6 +2,7 @@ package piece
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
 	"sort"
@@ -11,12 +12,13 @@ import (
 	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
+	mapset "github.com/deckarep/golang-set"
 )
 
 type rarestFirst struct {
 	sync.RWMutex
 	clientBitField bitmap.Bitmap
-	numPieces      int
+	tor            *torrent.Torrent
 	numBlocks      int
 	disk           disk.Disk
 	peerToPiece    map[string]int
@@ -28,7 +30,7 @@ type pieceInfo struct {
 	downloading bool
 	blocks      []*blockInfo
 	availabilty int
-	peers       []string
+	peers       mapset.Set
 }
 
 type blockInfo struct {
@@ -50,6 +52,9 @@ func (pm *rarestFirst) PeerChoked(id string) {
 
 	if pieceIndex, ok := pm.peerToPiece[id]; ok {
 		pm.pieceInfo[pieceIndex].downloading = false
+		for _, block := range pm.pieceInfo[pieceIndex].blocks {
+			block.downloading = false
+		}
 		delete(pm.peerToPiece, id)
 	}
 }
@@ -67,6 +72,9 @@ func (pm *rarestFirst) PeerStopped(id string, peerBitfield *bitmap.Bitmap) {
 
 	if pieceIndex, ok := pm.peerToPiece[id]; ok {
 		pm.pieceInfo[pieceIndex].downloading = false
+		for _, block := range pm.pieceInfo[pieceIndex].blocks {
+			block.downloading = false
+		}
 		delete(pm.peerToPiece, id)
 	}
 }
@@ -96,33 +104,38 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloaded = true
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading = false
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].data = data
-	if id != pm.pieceInfo[pieceIndex].peers[len(pm.pieceInfo[pieceIndex].peers)-1] {
-		pm.pieceInfo[pieceIndex].peers = append(pm.pieceInfo[pieceIndex].peers, id)
-	}
+	pm.pieceInfo[pieceIndex].peers.Add(id)
 
 	// If all blocks for piece are downloaded, set piece as downloaded
-	for i := len(pm.pieceInfo[pieceIndex].blocks); i >= 0; i-- {
+	for i := len(pm.pieceInfo[pieceIndex].blocks) - 1; i >= 0; i-- {
 		block := pm.pieceInfo[pieceIndex].blocks[i]
 		if !block.downloaded {
 			return nil
 		}
 	}
-	pm.pieceInfo[pieceIndex].downloaded = true
-	pm.pieceInfo[pieceIndex].downloading = false
-	delete(pm.peerToPiece, id)
 
-	// Write piece to disk
+	// Check piece's checksum
 	piece := &bytes.Buffer{}
 	for _, block := range pm.pieceInfo[pieceIndex].blocks {
 		binary.Write(piece, binary.BigEndian, block.data)
 	}
-	// check sha1 checksum
+	expected_checksum := []byte(pm.tor.MetaInfo.Info.Pieces[20*pieceIndex : 20*(pieceIndex+1)])
+	actual_checksum := sha1.Sum(piece.Bytes())
+	if !bytes.Equal(actual_checksum[:], expected_checksum[:]) {
+		return fmt.Errorf("checksum failed")
+	}
+
+	// Write piece to disk
+	pm.pieceInfo[pieceIndex].downloaded = true
+	pm.pieceInfo[pieceIndex].downloading = false
+	delete(pm.peerToPiece, id)
+	pm.clientBitField.Set(pieceIndex, true)
 	pm.disk.WritePieceRequest(pieceIndex, piece.Bytes())
 
 	return nil
 }
 
-func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) {
+func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) error {
 	pm.Lock()
 	defer pm.Unlock()
 
@@ -136,7 +149,7 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 		blocks = 1
 	} else {
 		// Find the peer's rarest piece that the client doesn't have
-		pieces := []int{}
+		pieces := make([]int, 0)
 		for pieceIndex := 0; pieceIndex < peerBitfield.Len(); pieceIndex++ {
 			if peerBitfield.Get(pieceIndex) {
 				if !pm.pieceInfo[pieceIndex].downloaded && !pm.pieceInfo[pieceIndex].downloading {
@@ -145,7 +158,7 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 			}
 		}
 		if len(pieces) == 0 {
-			return
+			return wire.SendUnInterested()
 		}
 		// sort them by rarity
 		sort.Slice(pieces, func(i, j int) bool {
@@ -153,40 +166,51 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 			return pm.pieceInfo[p1].availabilty < pm.pieceInfo[p2].availabilty
 		})
 
-		pm.peerToPiece[id] = pieceIndex
-		pm.pieceInfo[pieceIndex].downloading = true
 		pieceIndex = pieces[0]
 		blocks = MAX_OUTSTANDING_REQUESTS
+		pm.peerToPiece[id] = pieceIndex
+		pm.pieceInfo[pieceIndex].downloading = true
 	}
 
 	for blockIndex, block := range pm.pieceInfo[pieceIndex].blocks {
 		if !block.downloaded && !block.downloading {
-			wire.SendRequest(pieceIndex, blockIndex, BLOCK_SIZE)
+			err := wire.SendRequest(pieceIndex, blockIndex, BLOCK_SIZE)
+			if err != nil {
+				return err
+			}
 			pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading = true
 			blocks--
-			if blocks < 0 {
-				return
+			if blocks == 0 {
+				return nil
 			}
 		}
 	}
+	return nil
 }
 
 func NewRarestFirstPieceManager(
-	t *torrent.Torrent,
+	tor *torrent.Torrent,
 	disk disk.Disk) PieceManager {
 
 	pm := &rarestFirst{
-		disk:        disk,
-		numPieces:   t.NumPieces,
-		numBlocks:   t.MetaInfo.Info.PieceLength / BLOCK_SIZE,
-		peerToPiece: make(map[string]int),
+		clientBitField: bitmap.New(tor.NumPieces),
+		tor:            tor,
+		numBlocks:      tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
+		disk:           disk,
+		peerToPiece:    make(map[string]int),
 	}
 
-	pieceInfo := make([]*pieceInfo, pm.numPieces)
-	for _, pi := range pieceInfo {
-		pi.blocks = make([]*blockInfo, pm.numBlocks)
+	pis := make([]*pieceInfo, 0)
+	for i := 0; i < pm.tor.NumPieces; i++ {
+		pi := &pieceInfo{}
+		pi.blocks = make([]*blockInfo, 0)
+		for j := 0; j < pm.numBlocks; j++ {
+			pi.blocks = append(pi.blocks, &blockInfo{})
+		}
+		pi.peers = mapset.NewSet()
+		pis = append(pis, pi)
 	}
-	pm.pieceInfo = pieceInfo
+	pm.pieceInfo = pis
 
-	return nil
+	return pm
 }

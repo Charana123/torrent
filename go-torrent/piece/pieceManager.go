@@ -16,5 +16,5 @@ type PieceManager interface {
 	PeerStopped(id string, peerBitfield *bitmap.Bitmap)
 	PieceHave(id string, pieceIndex int)
 	WriteBlock(id string, pieceIndex, blockIndex int, data []byte) error
-	SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap)
+	SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) error
 }

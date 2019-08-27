@@ -176,7 +176,10 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 		p.peerBitfield = &bitfield
 		for pieceIndex := 0; pieceIndex < p.torrent.NumPieces; pieceIndex++ {
 			havePiece := bitmap.Get(peerBitfield, pieceIndex)
-			p.peerBitfield.Set(pieceIndex, havePiece)
+			if havePiece {
+				p.peerBitfield.Set(pieceIndex, true)
+				p.pieceMgr.PieceHave(p.id, pieceIndex)
+			}
 		}
 
 		// If client doesn't have piece in peer bitfield, become interested

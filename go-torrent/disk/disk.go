@@ -32,6 +32,7 @@ func NewDisk(
 	disk := &disk{
 		metainfo: metainfo,
 	}
+	disk.init()
 	return disk
 }
 
@@ -42,7 +43,7 @@ func fail(err error) {
 }
 
 func openOrCreateFile(path string) afero.File {
-	file, err := openFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	file, err := openFile(path, os.O_CREATE|os.O_RDWR, 0755)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -160,6 +161,7 @@ func (d *disk) WritePieceRequest(pieceIndex int, data []byte) error {
 				offset -= d.metainfo.Info.Files[fileIndex].Length
 			} else {
 				err = d.writePiece(fileIndex, offset, data)
+				break
 			}
 		}
 	} else {
