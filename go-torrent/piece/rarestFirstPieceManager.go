@@ -1,4 +1,4 @@
-package torrent
+package piece
 
 import (
 	"bytes"
@@ -7,6 +7,9 @@ import (
 	"sort"
 	"sync"
 
+	"github.com/Charana123/torrent/go-torrent/disk"
+	"github.com/Charana123/torrent/go-torrent/torrent"
+	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
 )
 
@@ -15,7 +18,7 @@ type rarestFirst struct {
 	clientBitField bitmap.Bitmap
 	numPieces      int
 	numBlocks      int
-	disk           Disk
+	disk           disk.Disk
 	peerToPiece    map[string]int
 	pieceInfo      []*pieceInfo
 }
@@ -119,7 +122,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	return nil
 }
 
-func (pm *rarestFirst) SendBlockRequests(id string, peer Peer, peerBitfield bitmap.Bitmap) {
+func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield bitmap.Bitmap) {
 	pm.Lock()
 	defer pm.Unlock()
 
@@ -158,7 +161,7 @@ func (pm *rarestFirst) SendBlockRequests(id string, peer Peer, peerBitfield bitm
 
 	for blockIndex, block := range pm.pieceInfo[pieceIndex].blocks {
 		if !block.downloaded && !block.downloading {
-			go peer.SendRequest(pieceIndex, blockIndex, BLOCK_SIZE)
+			wire.SendRequest(pieceIndex, blockIndex, BLOCK_SIZE)
 			pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading = true
 			blocks--
 			if blocks < 0 {
@@ -168,12 +171,14 @@ func (pm *rarestFirst) SendBlockRequests(id string, peer Peer, peerBitfield bitm
 	}
 }
 
-func NewRarestFirstPieceManager(t *Torrent, disk Disk) PieceManager {
+func NewRarestFirstPieceManager(
+	t *torrent.Torrent,
+	disk disk.Disk) PieceManager {
 
 	pm := &rarestFirst{
 		disk:        disk,
-		numPieces:   t.numPieces,
-		numBlocks:   t.metaInfo.Info.PieceLength / BLOCK_SIZE,
+		numPieces:   t.NumPieces,
+		numBlocks:   t.MetaInfo.Info.PieceLength / BLOCK_SIZE,
 		peerToPiece: make(map[string]int),
 	}
 

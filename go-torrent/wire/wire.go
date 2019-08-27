@@ -1,4 +1,4 @@
-package torrent
+package wire
 
 import (
 	"bytes"
@@ -20,77 +20,77 @@ const (
 )
 
 type Wire interface {
-	SendChoke()
-	SendUnchoke()
-	SendInterested()
-	SendUnInterested()
-	SendRequest(pieceIndex, blockIndex, length int)
-	SendBitField(bitfield []byte)
-	SendBlock(pieceIndex, begin int, block []byte)
+	SendChoke() error
+	SendUnchoke() error
+	SendInterested() error
+	SendUnInterested() error
+	SendRequest(pieceIndex, blockIndex, length int) error
+	SendBitField(bitfield []byte) error
+	SendBlock(pieceIndex, begin int, block []byte) error
 }
 
 type wire struct {
 	conn net.Conn
-	peer Peer
 }
 
-func (w *wire) SendChoke() {
+func (w *wire) SendChoke() error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(1))
 	binary.Write(b, binary.BigEndian, uint8(CHOKE))
-	w.sendMessage(b.Bytes())
+	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) SendUnchoke() {
+func (w *wire) SendUnchoke() error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(1))
 	binary.Write(b, binary.BigEndian, uint8(UNCHOKE))
-	w.sendMessage(b.Bytes())
+	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) SendInterested() {
+func (w *wire) SendInterested() error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(1))
 	binary.Write(b, binary.BigEndian, uint8(INTERESTED))
-	w.sendMessage(b.Bytes())
+	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) SendUnInterested() {
+func (w *wire) SendUnInterested() error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(1))
 	binary.Write(b, binary.BigEndian, uint8(NOT_INTERESTED))
-	w.sendMessage(b.Bytes())
+	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) SendBlock(pieceIndex, begin int, block []byte) {
+func (w *wire) SendBlock(pieceIndex, begin int, block []byte) error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(9+len(block)))
 	binary.Write(b, binary.BigEndian, uint8(BLOCK))
 	binary.Write(b, binary.BigEndian, block)
-	w.sendMessage(b.Bytes())
+	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) SendBitField(bitfield []byte) {
+func (w *wire) SendBitField(bitfield []byte) error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(1+len(bitfield)))
 	binary.Write(b, binary.BigEndian, uint8(BITFIELD))
 	binary.Write(b, binary.BigEndian, bitfield)
-	w.sendMessage(b.Bytes())
+	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) SendRequest(pieceIndex, blockIndex, length int) {
+func (w *wire) SendRequest(pieceIndex, blockIndex, length int) error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(13))
 	binary.Write(b, binary.BigEndian, uint8(REQUEST))
 	binary.Write(b, binary.BigEndian, int32(pieceIndex))
 	binary.Write(b, binary.BigEndian, int32(blockIndex))
 	binary.Write(b, binary.BigEndian, int32(length))
-	w.sendMessage(b.Bytes())
+	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) sendMessage(msg []byte) {
+func (w *wire) sendMessage(msg []byte) error {
 	_, err := w.conn.Write(msg)
 	if err != nil {
-		w.peer.Stop()
+		return err
 	}
+	return nil
 }

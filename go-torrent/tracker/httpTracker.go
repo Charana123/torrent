@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strconv"
 
+	"github.com/Charana123/torrent/go-torrent/torrent"
 	bencode "github.com/jackpal/bencode-go"
 )
 
@@ -21,13 +22,13 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	}
 
 	q := u.Query()
-	urlEncodedInfoHash := url.QueryEscape(string(tr.torrent.infoHash))
+	urlEncodedInfoHash := url.QueryEscape(string(tr.torrent.InfoHash))
 	q.Set("info_hash", urlEncodedInfoHash)
-	urlEncodedPeerID := url.QueryEscape(string(PEER_ID))
+	urlEncodedPeerID := url.QueryEscape(string(torrent.PEER_ID))
 	q.Set("peer_id", urlEncodedPeerID)
-	q.Set("uploaded", strconv.Itoa(tr.progressStats.uploaded))
-	q.Set("downloaded", strconv.Itoa(tr.progressStats.downloaded))
-	q.Set("left", strconv.Itoa(tr.progressStats.left))
+	// q.Set("uploaded", strconv.Itoa(tr.progressStats.uploaded))
+	// q.Set("downloaded", strconv.Itoa(tr.progressStats.downloaded))
+	// q.Set("left", strconv.Itoa(tr.progressStats.left))
 	q.Set("key", strconv.Itoa(int(tr.key)))
 	switch event {
 	case COMPLETED:
@@ -64,9 +65,8 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 		for i := 0; i < len(peerAddrs); i += 6 {
 			ip := net.IPv4(peerAddrs[i+0], peerAddrs[i+1], peerAddrs[i+2], peerAddrs[i+3])
 			port := binary.BigEndian.Uint16(peerAddrs[i+4 : i+6])
-			peer := &peer{}
-			peer.id = fmt.Sprintf("%s:%d", ip.String(), port)
-			tr.peerMChans.peers <- peer
+			id := fmt.Sprintf("%s:%d", ip.String(), port)
+			tr.peerMgr.AddPeer(id, nil)
 		}
 	}
 	return nil

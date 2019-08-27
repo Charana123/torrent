@@ -1,6 +1,7 @@
-package torrent
+package piece
 
 import (
+	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
 )
 
@@ -15,5 +16,5 @@ type PieceManager interface {
 	PeerStopped(id string, peerBitfield bitmap.Bitmap)
 	PieceHave(id string, pieceIndex int)
 	WriteBlock(id string, pieceIndex, blockIndex int, data []byte) error
-	SendBlockRequests(id string, peer Peer, peerBitfield bitmap.Bitmap)
+	SendBlockRequests(id string, wire wire.Wire, peerBitfield bitmap.Bitmap)
 }

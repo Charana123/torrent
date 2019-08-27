@@ -1,9 +1,14 @@
-package torrent
+package peer
 
-import "sync"
+import (
+	"net"
+	"sync"
+
+	"github.com/Charana123/torrent/go-torrent/torrent"
+)
 
 type PeerManager interface {
-	AddPeer(peer *peer)
+	AddPeer(id string, conn net.Conn)
 	RemovePeer(id string)
 	GetPeerList() []*PeerInfo
 }
@@ -17,7 +22,7 @@ func (pm *peerManager) GetPeerList() []*PeerInfo {
 		pi := &PeerInfo{}
 		pi.id = peer.id
 		pi.state = peer.state
-		pi.peer = peer
+		pi.wire = peer.wire
 		pi.lastPiece = 0 // TODO
 		pi.speed = 0     // TODO
 
@@ -26,7 +31,7 @@ func (pm *peerManager) GetPeerList() []*PeerInfo {
 	return peers
 }
 
-func (pm *peerManager) AddPeer(peer *peer) {
+func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 	pm.Lock()
 	defer pm.Unlock()
 
@@ -34,7 +39,7 @@ func (pm *peerManager) AddPeer(peer *peer) {
 		// Connected to too many peers
 		return
 	}
-	if _, ok := pm.peers[peer.id]; ok {
+	if _, ok := pm.peers[id]; ok {
 		// Already connected to peer
 		return
 	}
@@ -48,8 +53,8 @@ func (pm *peerManager) AddPeer(peer *peer) {
 	// notify choke chan ?
 	// go func() { pm.chokeChans.newPeer <- fromChokeChans }()
 
-	pm.peers[peer.id] = peer
-	pm.numPeers++
+	// pm.peers[id] = peer
+	// pm.numPeers++
 }
 
 func (pm *peerManager) RemovePeer(id string) {
@@ -68,27 +73,16 @@ type peerManager struct {
 	numPeers int
 	maxPeers int
 
-	// channels
-	trackerChans   *trackerPeerMChans
-	chokeChans     *peerMChokeChans
-	chokePeerChans *peerChokeChans
-
 	// other
-	torrent *Torrent
+	torrent *torrent.Torrent
 	quit    chan int
 }
 
 func NewPeerManager(
-	torrent *Torrent,
-	trackerChans *trackerPeerMChans,
-	chokeChans *peerMChokeChans,
-	chokePeerChans *peerChokeChans) PeerManager {
+	torrent *torrent.Torrent) PeerManager {
 
 	pm := &peerManager{
-		torrent:        torrent,
-		trackerChans:   trackerChans,
-		chokeChans:     chokeChans,
-		chokePeerChans: chokePeerChans,
+		torrent: torrent,
 	}
 	return pm
 }

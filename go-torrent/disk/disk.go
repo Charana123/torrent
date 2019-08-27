@@ -1,4 +1,4 @@
-package torrent
+package disk
 
 import (
 	"bytes"
@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/spf13/afero"
 )
 
@@ -15,18 +16,18 @@ var appFS = afero.NewOsFs()
 var openFile = appFS.OpenFile
 
 type Disk interface {
-	BlockReadRequest(pieceIndex, blockByteOffset, length int, resp chan *blockReadResponse)
-	WritePieceRequest(pieceIndex int, data []byte)
+	BlockReadRequest(pieceIndex, blockByteOffset, length int) ([]byte, error)
+	WritePieceRequest(pieceIndex int, data []byte) error
 }
 
 type disk struct {
-	metainfo  *metaInfo
+	metainfo  *torrent.MetaInfo
 	files     []afero.File
 	fileLocks []*sync.Mutex
 }
 
 func NewDisk(
-	metainfo *metaInfo) *disk {
+	metainfo *torrent.MetaInfo) Disk {
 
 	disk := &disk{
 		metainfo: metainfo,
@@ -112,13 +113,13 @@ func (d *disk) BlockReadRequest(pieceIndex, blockByteOffset, length int) ([]byte
 			if offset >= d.metainfo.Info.Files[fileIndex].Length-1 {
 				offset -= d.metainfo.Info.Files[fileIndex].Length
 			} else {
-				block, err := d.readBlock(fileIndex, offset, length)
+				block, err = d.readBlock(fileIndex, offset, length)
 				break
 			}
 		}
 	} else {
 		// Single File Mode
-		block, err := d.readBlock(0, offset, length)
+		block, err = d.readBlock(0, offset, length)
 	}
 	if err != nil {
 		return nil, err

@@ -1,15 +1,17 @@
-package torrent
+package server
 
 import (
 	"log"
 	"net"
+
+	"github.com/Charana123/torrent/go-torrent/peer"
 )
 
 type server struct {
 	port     int
 	listener net.Listener
 	quit     chan int
-	pm       PeerManager
+	pm       peer.PeerManager
 }
 
 var (
@@ -17,7 +19,10 @@ var (
 )
 
 // give as input, the connection that sends peer connections to torrent
-func newServer(pm PeerManager, quit chan int) (*server, error) {
+func newServer(
+	pm peer.PeerManager,
+	quit chan int) (*server, error) {
+
 	sv := &server{
 		pm:   pm,
 		quit: quit,
@@ -46,10 +51,7 @@ func (sv *server) serve() {
 					sig <- 1
 					return
 				}
-				peer := &peer{}
-				peer.conn = conn
-				peer.id = conn.RemoteAddr().String()
-				sv.pm.AddPeer(peer)
+				sv.pm.AddPeer(conn.RemoteAddr().String(), conn)
 				sig <- 0
 			}()
 

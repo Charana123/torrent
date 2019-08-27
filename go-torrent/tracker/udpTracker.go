@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"math/rand"
 	"net"
+
+	"github.com/Charana123/torrent/go-torrent/torrent"
 )
 
 // BEP 0015 - UDP Tracker Protocol for BitTorrent
@@ -86,11 +88,11 @@ func (tr *tracker) announceUDP(trackerURLWithoutSchema string, event int, connec
 	binary.Write(announceRequest, binary.BigEndian, action)
 	transactionID := rand.Int31()
 	binary.Write(announceRequest, binary.BigEndian, transactionID)
-	binary.Write(announceRequest, binary.BigEndian, tr.torrent.infoHash)
-	binary.Write(announceRequest, binary.BigEndian, PEER_ID)
-	binary.Write(announceRequest, binary.BigEndian, tr.progressStats.downloaded)
-	binary.Write(announceRequest, binary.BigEndian, tr.progressStats.left)
-	binary.Write(announceRequest, binary.BigEndian, tr.progressStats.uploaded)
+	binary.Write(announceRequest, binary.BigEndian, tr.torrent.InfoHash)
+	binary.Write(announceRequest, binary.BigEndian, torrent.PEER_ID)
+	// binary.Write(announceRequest, binary.BigEndian, tr.progressStats.downloaded)
+	// binary.Write(announceRequest, binary.BigEndian, tr.progressStats.left)
+	// binary.Write(announceRequest, binary.BigEndian, tr.progressStats.uploaded)
 	binary.Write(announceRequest, binary.BigEndian, event)
 	if tr.ip != nil {
 		binary.Write(announceRequest, binary.BigEndian, tr.ip)
@@ -135,9 +137,8 @@ func (tr *tracker) announceUDP(trackerURLWithoutSchema string, event int, connec
 		for i := 0; i < len(peerAddrs); i += 6 {
 			ip := net.IPv4(peerAddrs[i+0], peerAddrs[i+1], peerAddrs[i+2], peerAddrs[i+3])
 			port := binary.BigEndian.Uint16(peerAddrs[i+4 : i+6])
-			peer := &peer{}
-			peer.id = fmt.Sprintf("%s:%d", ip.String(), port)
-			tr.peerMChans.peers <- peer
+			id := fmt.Sprintf("%s:%d", ip.String(), port)
+			tr.peerMgr.AddPeer(id, nil)
 		}
 	}
 	return nil

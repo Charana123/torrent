@@ -1,10 +1,12 @@
-package torrent
+package peer
 
 import (
 	"fmt"
 	"math/rand"
 	"sort"
 	"time"
+
+	"github.com/Charana123/torrent/go-torrent/wire"
 )
 
 const (
@@ -14,9 +16,14 @@ const (
 )
 
 type PeerInfo struct {
-	id            string
-	peer          Peer
-	state         connState
+	id    string
+	wire  wire.Wire
+	state struct {
+		peerInterested   bool
+		clientInterested bool
+		peerChoking      bool
+		clientChoking    bool
+	}
 	lastPiece     int64
 	speed         int
 	shouldUnchoke bool
@@ -99,12 +106,12 @@ func (c *choke) choke() {
 	// apply unchoke/choke
 	for _, peer := range peers {
 		if peer.shouldUnchoke && peer.state.clientChoking {
-			peer.peer.SendUnchoke()
+			peer.wire.SendUnchoke()
 		}
 		// keep choking and the client is currently not choking
 		// then choke
 		if !peer.shouldUnchoke && !peer.state.clientChoking {
-			peer.peer.SendChoke()
+			peer.wire.SendChoke()
 		}
 	}
 }

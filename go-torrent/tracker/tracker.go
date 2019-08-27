@@ -6,6 +6,10 @@ import (
 	"math/rand"
 	"net"
 	"time"
+
+	"github.com/Charana123/torrent/go-torrent/peer"
+
+	"github.com/Charana123/torrent/go-torrent/torrent"
 )
 
 const (
@@ -15,26 +19,24 @@ const (
 	STOPPED   = 3
 )
 
+type Tracker interface {
+}
+
 type tracker struct {
-	torrent       *Torrent
-	progressStats *progressStats
-	quit          chan int
-	port          uint16
-	ip            *net.IP
-	key           int32
-	numwant       int32
-	announceResp  struct {
+	torrent      *torrent.Torrent
+	peerMgr      peer.PeerManager
+	quit         chan int
+	port         uint16
+	ip           *net.IP
+	key          int32
+	numwant      int32
+	announceResp struct {
 		FailureReason string `bencode:"failure reason"`
 		Interval      int32
 		Leechers      int32 `bencode:"incomplete"`
 		Seeders       int32 `bencode:"complete"`
 		Peers         string
 	}
-	peerMChans *trackerPeerMChans
-	// TODO - who controls these ?
-	// tStatsEvent        chan int
-	// tStatsResponse     chan *TrackerStats
-	// tCompleteEventChan chan int
 }
 
 func genKey() int32 {
@@ -43,21 +45,20 @@ func genKey() int32 {
 }
 
 func newTracker(
-	torrent *Torrent,
-	progressStats *progressStats,
-	quit chan int, port int, ip *net.IP,
-	peerMChans *trackerPeerMChans) *tracker {
+	torrent *torrent.Torrent,
+	quit chan int,
+	port int,
+	ip *net.IP) *tracker {
 
 	// TODO - DI for `tStatsEvent` and `tCompleteEventChan`
 	// TODO - Pass `tStatsResponse` to whoever
 	return &tracker{
-		torrent:       torrent,
-		progressStats: progressStats,
-		quit:          quit,
-		port:          uint16(port),
-		ip:            ip,
-		key:           genKey(),
-		numwant:       50,
+		torrent: torrent,
+		quit:    quit,
+		port:    uint16(port),
+		ip:      ip,
+		key:     genKey(),
+		numwant: 50,
 	}
 }
 
@@ -99,8 +100,8 @@ func (tr *tracker) announceTracker(trackerURL string) error {
 }
 
 func (tr *tracker) connectTracker() {
-	if len(tr.torrent.metaInfo.AnnounceList) > 0 {
-		for _, trackerURLs := range tr.torrent.metaInfo.AnnounceList {
+	if len(tr.torrent.MetaInfo.AnnounceList) > 0 {
+		for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
 			for _, trackerURL := range trackerURLs {
 				err := tr.announceTracker(trackerURL)
 				if err == nil {
@@ -114,7 +115,7 @@ func (tr *tracker) connectTracker() {
 			}
 		}
 	} else {
-		tr.announceTracker(tr.torrent.metaInfo.Announce)
+		tr.announceTracker(tr.torrent.MetaInfo.Announce)
 	}
 }
 
