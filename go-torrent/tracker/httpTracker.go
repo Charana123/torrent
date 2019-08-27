@@ -26,9 +26,10 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	q.Set("info_hash", urlEncodedInfoHash)
 	urlEncodedPeerID := url.QueryEscape(string(torrent.PEER_ID))
 	q.Set("peer_id", urlEncodedPeerID)
-	// q.Set("uploaded", strconv.Itoa(tr.progressStats.uploaded))
-	// q.Set("downloaded", strconv.Itoa(tr.progressStats.downloaded))
-	// q.Set("left", strconv.Itoa(tr.progressStats.left))
+	uploaded, downloaded, left := tr.stats.GetTrackerStats()
+	q.Set("uploaded", strconv.Itoa(uploaded))
+	q.Set("downloaded", strconv.Itoa(downloaded))
+	q.Set("left", strconv.Itoa(left))
 	q.Set("key", strconv.Itoa(int(tr.key)))
 	switch event {
 	case COMPLETED:
@@ -38,11 +39,11 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	case STOPPED:
 		q.Set("key", "stopped")
 	}
-	if tr.ip != nil {
-		q.Set("ip", tr.ip.String())
+	if tr.clientIP != nil {
+		q.Set("ip", tr.clientIP.String())
 	}
 	q.Set("numwant", strconv.Itoa(int(tr.numwant)))
-	q.Set("port", strconv.Itoa(int(tr.port)))
+	q.Set("port", strconv.Itoa(int(tr.serverPort)))
 	q.Set("compact", "1")
 	u.RawQuery = q.Encode()
 

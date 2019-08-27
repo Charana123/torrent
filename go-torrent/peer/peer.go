@@ -211,8 +211,8 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 					delete(p.readRequestCancelChan, requestID)
 					block, err := p.disk.BlockReadRequest(pieceIndex, blockByteOffset, length)
 					if err != nil {
-						fmt.Println("invalid block request from peer")
 						p.Stop()
+						return
 					}
 					p.wire.SendBlock(pieceIndex, blockByteOffset, block)
 				}
@@ -237,6 +237,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			if err != nil {
 				log.Println(err)
 				p.Stop()
+				return
 			}
 			p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
 		}()

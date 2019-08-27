@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Charana123/torrent/go-torrent/peer"
 	"github.com/stretchr/testify/mock"
 )
 
@@ -29,7 +30,7 @@ func (m *mockListener) Close() error {
 }
 
 type mockPM struct {
-	PeerManager
+	peer.PeerManager
 	mock.Mock
 }
 
