@@ -50,7 +50,8 @@ func NewTracker(
 	torrent *torrent.Torrent,
 	quit chan int,
 	serverPort int,
-	clientIP net.IP) Tracker {
+	clientIP net.IP,
+	stats stats.Stats) Tracker {
 
 	tr := &tracker{
 		torrent:    torrent,
@@ -59,6 +60,7 @@ func NewTracker(
 		clientIP:   clientIP,
 		key:        genKey(),
 		numwant:    50,
+		stats:      stats,
 	}
 	return tr
 }

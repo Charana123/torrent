@@ -6,6 +6,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/Charana123/torrent/go-torrent/stats"
 	"github.com/Charana123/torrent/go-torrent/wire"
 )
 
@@ -30,18 +31,27 @@ type PeerInfo struct {
 	snubbedClient bool
 }
 
+type Choke interface {
+	Start()
+}
+
 type choke struct {
 	peerMgr PeerManager
+	stats   stats.Stats
+	seeding bool
 	quit    chan int
 }
 
-func newChoke(peerMgr PeerManager, quit chan int) *choke {
-	choke := &choke{
+func NewChoke(
+	peerMgr PeerManager,
+	stats stats.Stats,
+	quit chan int) Choke {
+
+	return &choke{
 		peerMgr: peerMgr,
+		stats:   stats,
 		quit:    quit,
 	}
-	go choke.start()
-	return choke
 }
 
 func sortBySpeed(peers []*PeerInfo) {
@@ -52,11 +62,17 @@ func sortBySpeed(peers []*PeerInfo) {
 
 func (c *choke) choke() {
 	peers := c.peerMgr.GetPeerList()
+	peerStats := c.stats.GetPeerStats()
 
 	// Partition interested and uninterested peers
 	interested := make([]*PeerInfo, 0)
 	notInterested := make([]*PeerInfo, 0)
 	for _, peer := range peers {
+		if c.seeding {
+			peer.speed = peerStats[peer.id].UploadRate
+		} else {
+			peer.speed = peerStats[peer.id].DownloadRate
+		}
 		if time.Now().Unix()-peer.lastPiece > SNUBBED_PERIOD {
 			peer.snubbedClient = true
 		}
@@ -82,7 +98,6 @@ func (c *choke) choke() {
 	// unchoke all uninterested peers with better upload rates s.t. when they become
 	// interested and start downloading from the client, they might choose the client
 	// as one of their 4 active downloaders i.e. unchoke the client
-	fmt.Println("speedThreshold: ", speedThreshold)
 	for i := 0; i < len(notInterested) && notInterested[i].speed > speedThreshold; i++ {
 		notInterested[i].shouldUnchoke = true
 	}
@@ -116,16 +131,14 @@ func (c *choke) choke() {
 	}
 }
 
-func (c *choke) start() {
+func (c *choke) Start() {
 
 	for {
-		c.choke()
 		select {
 		case <-c.quit:
-			fmt.Println("choke stopping")
 			return
-		case <-time.After(time.Duration(CHOKE_INTERVAL) * time.Second):
-			continue
+		case <-time.After(time.Duration(CHOKE_INTERVAL * time.Second)):
+			c.choke()
 		}
 	}
 }

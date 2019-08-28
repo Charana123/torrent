@@ -4,6 +4,11 @@ import (
 	"net"
 	"sync"
 
+	"github.com/Charana123/torrent/go-torrent/stats"
+	"github.com/Charana123/torrent/go-torrent/storage"
+
+	"github.com/Charana123/torrent/go-torrent/piece"
+
 	"github.com/Charana123/torrent/go-torrent/torrent"
 )
 
@@ -11,6 +16,42 @@ type PeerManager interface {
 	AddPeer(id string, conn net.Conn)
 	RemovePeer(id string)
 	GetPeerList() []*PeerInfo
+	StopPeers()
+}
+
+type peerManager struct {
+	sync.RWMutex
+	torrent  *torrent.Torrent
+	pieceMgr piece.PieceManager
+	storage  storage.Storage
+	stats    stats.Stats
+	peers    map[string]Peer
+	numPeers int
+	maxPeers int
+	quit     chan int
+}
+
+func NewPeerManager(
+	torrent *torrent.Torrent,
+	pieceMgr piece.PieceManager,
+	storage storage.Storage,
+	stats stats.Stats) PeerManager {
+
+	return &peerManager{
+		torrent:  torrent,
+		pieceMgr: pieceMgr,
+		storage:  storage,
+		stats:    stats,
+	}
+}
+
+func (pm *peerManager) StopPeers() {
+	pm.RLock()
+	defer pm.RUnlock()
+
+	for _, peer := range pm.peers {
+		peer.Stop()
+	}
 }
 
 func (pm *peerManager) GetPeerList() []*PeerInfo {
@@ -20,11 +61,8 @@ func (pm *peerManager) GetPeerList() []*PeerInfo {
 	peers := []*PeerInfo{}
 	for _, peer := range pm.peers {
 		pi := &PeerInfo{}
-		pi.id = peer.id
-		pi.state = peer.state
-		pi.wire = peer.wire
-		pi.lastPiece = 0 // TODO
-		pi.speed = 0     // TODO
+		pi.id, pi.state, pi.wire, pi.lastPiece = peer.GetPeerInfo()
+		pi.speed = 0 // TODO
 
 		peers = append(peers, pi)
 	}
@@ -63,26 +101,4 @@ func (pm *peerManager) RemovePeer(id string) {
 
 	delete(pm.peers, id)
 	pm.numPeers--
-}
-
-type peerManager struct {
-	sync.RWMutex
-
-	// peer related
-	peers    map[string]*peer
-	numPeers int
-	maxPeers int
-
-	// other
-	torrent *torrent.Torrent
-	quit    chan int
-}
-
-func NewPeerManager(
-	torrent *torrent.Torrent) PeerManager {
-
-	pm := &peerManager{
-		torrent: torrent,
-	}
-	return pm
 }

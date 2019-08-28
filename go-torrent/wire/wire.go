@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"time"
 )
 
 const (
@@ -28,6 +29,7 @@ type Wire interface {
 
 	// Writing
 	SendHandshake(length uint8, protocol string, infohash []byte, peerID []byte) error
+	SendKeepAlive() error
 	SendChoke() error
 	SendUnchoke() error
 	SendInterested() error
@@ -38,16 +40,23 @@ type Wire interface {
 	// SendCancel(pieceIndex, begin, length int) error
 
 	// Other
+	GetLastMessageSent() (lastMessageSent time.Time)
 	Close()
 }
 
 type wire struct {
-	conn net.Conn
+	conn            *net.TCPConn
+	timeoutDuration time.Duration
+	lastMessageSent time.Time
 }
 
-func NewWire(conn net.Conn) Wire {
+func NewWire(
+	conn *net.TCPConn,
+	timeoutDuration time.Duration) Wire {
+
 	return &wire{
-		conn: conn,
+		conn:            conn,
+		timeoutDuration: timeoutDuration,
 	}
 }
 
@@ -57,6 +66,16 @@ type handshake struct {
 	Reserved [8]uint8
 	InfoHash [20]byte
 	PeerID   [20]byte
+}
+
+func (w *wire) GetLastMessageSent() time.Time {
+	return w.lastMessageSent
+}
+
+func (w *wire) SendKeepAlive() error {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, int(1))
+	return w.sendMessage(b.Bytes())
 }
 
 func (w *wire) SendHandshake(length uint8, protocol string, infohash []byte, peerID []byte) error {
@@ -75,6 +94,7 @@ func (w *wire) Close() {
 
 func (w *wire) ReadHandshake() (uint8, string, []byte, []byte, error) {
 	h := handshake{}
+	w.conn.SetReadDeadline(time.Now().Add(w.timeoutDuration))
 	err := binary.Read(w.conn, binary.BigEndian, h)
 	if err != nil {
 		return 0, "", nil, nil, err
@@ -83,6 +103,7 @@ func (w *wire) ReadHandshake() (uint8, string, []byte, []byte, error) {
 }
 
 func (w *wire) ReadMessage() (int, byte, []byte, error) {
+	w.conn.SetReadDeadline(time.Now().Add(w.timeoutDuration))
 	data, err := ioutil.ReadAll(w.conn)
 	if err != nil {
 		return 0, 0, nil, err
@@ -169,6 +190,8 @@ func (w *wire) SendRequest(pieceIndex, blockIndex, length int) error {
 }
 
 func (w *wire) sendMessage(msg []byte) error {
+	w.lastMessageSent = time.Now()
+	w.conn.SetWriteDeadline(time.Now().Add(w.timeoutDuration))
 	_, err := w.conn.Write(msg)
 	if err != nil {
 		return err

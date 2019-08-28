@@ -39,6 +39,34 @@ type blockInfo struct {
 	data        []byte
 }
 
+func NewRarestFirstPieceManager(
+	tor *torrent.Torrent,
+	storage storage.Storage,
+	clientBitField bitmap.Bitmap) PieceManager {
+
+	pm := &rarestFirst{
+		clientBitField: clientBitField,
+		tor:            tor,
+		numBlocks:      tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
+		storage:        storage,
+		peerToPiece:    make(map[string]int),
+	}
+
+	pis := make([]*pieceInfo, 0)
+	for i := 0; i < pm.tor.NumPieces; i++ {
+		pi := &pieceInfo{}
+		pi.blocks = make([]*blockInfo, 0)
+		for j := 0; j < pm.numBlocks; j++ {
+			pi.blocks = append(pi.blocks, &blockInfo{})
+		}
+		pi.peers = mapset.NewSet()
+		pis = append(pis, pi)
+	}
+	pm.pieceInfo = pis
+
+	return pm
+}
+
 func (pm *rarestFirst) GetBitField() []byte {
 	pm.RLock()
 	defer pm.RUnlock()
@@ -186,31 +214,4 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 		}
 	}
 	return nil
-}
-
-func NewRarestFirstPieceManager(
-	tor *torrent.Torrent,
-	storage storage.Storage) PieceManager {
-
-	pm := &rarestFirst{
-		clientBitField: bitmap.New(tor.NumPieces),
-		tor:            tor,
-		numBlocks:      tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
-		storage:        storage,
-		peerToPiece:    make(map[string]int),
-	}
-
-	pis := make([]*pieceInfo, 0)
-	for i := 0; i < pm.tor.NumPieces; i++ {
-		pi := &pieceInfo{}
-		pi.blocks = make([]*blockInfo, 0)
-		for j := 0; j < pm.numBlocks; j++ {
-			pi.blocks = append(pi.blocks, &blockInfo{})
-		}
-		pi.peers = mapset.NewSet()
-		pis = append(pis, pi)
-	}
-	pm.pieceInfo = pis
-
-	return pm
 }

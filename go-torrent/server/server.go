@@ -8,12 +8,8 @@ import (
 )
 
 type Server interface {
-	GetServerPort() int
 	Serve()
-}
-
-func (sv *server) GetServerPort() int {
-	return sv.port
+	GetServerPort() int
 }
 
 type server struct {
@@ -27,7 +23,6 @@ var (
 	listen = net.Listen
 )
 
-// give as input, the connection that sends peer connections to torrent
 func NewServer(
 	pm peer.PeerManager,
 	quit chan int) (Server, error) {
@@ -36,8 +31,8 @@ func NewServer(
 		pm:   pm,
 		quit: quit,
 	}
-	var err error
-	sv.listener, err = listen("tcp4", "")
+	listener, err := listen("tcp4", "")
+	sv.listener = listener
 	if err != nil {
 		return nil, err
 	}
@@ -77,4 +72,8 @@ func (sv *server) Serve() {
 			}
 		}
 	}()
+}
+
+func (sv *server) GetServerPort() int {
+	return sv.port
 }

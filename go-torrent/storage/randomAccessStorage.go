@@ -17,6 +17,7 @@ import (
 )
 
 type randomAccessStorage struct {
+	sync.RWMutex
 	torrent     *torrent.Torrent
 	fileLocks   []*sync.Mutex
 	files       []afero.File
@@ -40,6 +41,9 @@ func openOrCreateFile(path string, length int) afero.File {
 }
 
 func (d *randomAccessStorage) Init() {
+	d.Lock()
+	defer d.Unlock()
+
 	if len(d.torrent.MetaInfo.Info.Files) > 0 {
 		// Multiple File Mode
 
@@ -180,7 +184,7 @@ func (d *randomAccessStorage) WritePieceRequest(pieceIndex int, data []byte) err
 	return nil
 }
 
-func (d *randomAccessStorage) GetCurrentDownloadState() (bitmap.Bitmap, bool) {
+func (d *randomAccessStorage) GetCurrentDownloadState() (bitmap.Bitmap, bool, int) {
 	clientBitfield := bitmap.New(d.torrent.NumPieces)
 	// read pieces sequentially, validating the checksums
 	for pieceIndex := 0; pieceIndex < d.torrent.NumPieces; pieceIndex++ {
@@ -192,6 +196,17 @@ func (d *randomAccessStorage) GetCurrentDownloadState() (bitmap.Bitmap, bool) {
 			clientBitfield.Set(pieceIndex, true)
 		}
 	}
-	completed := underscore.Chain(clientBitfield.Data(false)).All(func(b byte) bool { return b == 1 })
-	return clientBitfield, completed
+
+	piecesDownloaded := 0
+	underscore.
+		Chain(clientBitfield.Data(false)).
+		Distinct(func(b byte) bool { return b == 1 }).
+		Value(&piecesDownloaded)
+	left := d.torrent.Length - piecesDownloaded*d.torrent.MetaInfo.Info.PieceLength
+	completed := false
+	if piecesDownloaded == d.torrent.NumPieces {
+		completed = true
+	}
+
+	return clientBitfield, completed, left
 }

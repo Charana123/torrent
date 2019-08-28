@@ -6,20 +6,26 @@ import (
 	"net"
 	"net/http"
 
+	"github.com/Charana123/torrent/go-torrent/piece"
+	"github.com/Charana123/torrent/go-torrent/stats"
+
+	"github.com/Charana123/torrent/go-torrent/storage"
+
 	"github.com/Charana123/torrent/go-torrent/peer"
 	"github.com/Charana123/torrent/go-torrent/server"
 	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/Charana123/torrent/go-torrent/tracker"
 )
 
-type Client interface {
+type Download interface {
 	Start(path string) error
 	Stop()
 	CleanUp()
 }
 
-type client struct {
-	quit chan int
+type download struct {
+	quit    chan int
+	peerMgr peer.PeerManager
 }
 
 func getExternalIP() (string, error) {
@@ -37,12 +43,12 @@ func getExternalIP() (string, error) {
 	return string(bytes.TrimSpace(buf)), nil
 }
 
-func NewClient() Client {
-	return &client{}
+func NewDownload() Download {
+	return &download{}
 }
 
 // Start/Resume downloading/uploading torrent
-func (c *client) Start(path string) error {
+func (d *download) Start(path string) error {
 
 	t, err := torrent.NewTorrent(path)
 	if err != nil {
@@ -50,10 +56,15 @@ func (c *client) Start(path string) error {
 	}
 
 	quit := make(chan int)
-	c.quit = quit
+	d.quit = quit
 
-	peerMgr := peer.NewPeerManager(t)
-	sv, err := server.NewServer(peerMgr, quit)
+	storage := storage.NewRandomAccessStorage(t)
+	go storage.Init()
+	clientBitfield, _, left := storage.GetCurrentDownloadState()
+	stats := stats.NewStats(0, 0, left)
+	pieceMgr := piece.NewRarestFirstPieceManager(t, storage, clientBitfield)
+	d.peerMgr = peer.NewPeerManager(t, pieceMgr, storage, stats)
+	sv, err := server.NewServer(d.peerMgr, quit)
 	go sv.Serve()
 	if err != nil {
 		return err
@@ -62,18 +73,19 @@ func (c *client) Start(path string) error {
 	if err != nil {
 		return err
 	}
-	tr := tracker.NewTracker(t, quit, sv.GetServerPort(), net.ParseIP(clientIP))
-	go tr.Start()
+	tracker := tracker.NewTracker(t, quit, sv.GetServerPort(), net.ParseIP(clientIP), stats)
+	go tracker.Start()
 	return nil
 }
 
 // Stop downloading/uploading torrent
-func (t *client) Stop() {
-
+func (d *download) Stop() {
+	close(d.quit)
+	go d.peerMgr.StopPeers()
 }
 
 // Delete  (potentially only partially) downloaded torrent files
-func (t *client) CleanUp() {
+func (d *download) CleanUp() {
 
 }
 
