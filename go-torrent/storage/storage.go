@@ -12,9 +12,10 @@ var appFS = afero.NewOsFs()
 var openFile = appFS.OpenFile
 
 type Storage interface {
+	Init()
 	BlockReadRequest(pieceIndex, blockByteOffset, length int) (blockData []byte, err error)
 	WritePieceRequest(pieceIndex int, data []byte) (err error)
-	GetDownloadState() (clientBitfield bitmap.Bitmap, completed bool)
+	GetCurrentDownloadState() (clientBitfield bitmap.Bitmap, completed bool)
 }
 
 func fail(err error) {

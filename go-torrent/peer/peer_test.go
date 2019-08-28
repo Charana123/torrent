@@ -58,10 +58,6 @@ func (m *mockPieceManager) PeerStopped(id string, peerBitfield *bitmap.Bitmap) {
 	m.Called(id, peerBitfield)
 }
 
-// type mockDisk struct {
-// 	Disk
-// }
-
 func preFunc(t *testing.T) (*torrent.Torrent, *mockPieceManager, *mockWire) {
 	mockWire := &mockWire{}
 	newWire = func(conn net.Conn) wire.Wire {

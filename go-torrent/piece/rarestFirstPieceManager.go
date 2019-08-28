@@ -8,7 +8,7 @@ import (
 	"sort"
 	"sync"
 
-	"github.com/Charana123/torrent/go-torrent/disk"
+	"github.com/Charana123/torrent/go-torrent/storage"
 	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
@@ -20,7 +20,7 @@ type rarestFirst struct {
 	clientBitField bitmap.Bitmap
 	tor            *torrent.Torrent
 	numBlocks      int
-	disk           disk.Disk
+	storage        storage.Storage
 	peerToPiece    map[string]int
 	pieceInfo      []*pieceInfo
 }
@@ -130,7 +130,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	pm.pieceInfo[pieceIndex].downloading = false
 	delete(pm.peerToPiece, id)
 	pm.clientBitField.Set(pieceIndex, true)
-	pm.disk.WritePieceRequest(pieceIndex, piece.Bytes())
+	pm.storage.WritePieceRequest(pieceIndex, piece.Bytes())
 
 	return nil
 }
@@ -190,13 +190,13 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 
 func NewRarestFirstPieceManager(
 	tor *torrent.Torrent,
-	disk disk.Disk) PieceManager {
+	storage storage.Storage) PieceManager {
 
 	pm := &rarestFirst{
 		clientBitField: bitmap.New(tor.NumPieces),
 		tor:            tor,
 		numBlocks:      tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
-		disk:           disk,
+		storage:        storage,
 		peerToPiece:    make(map[string]int),
 	}
 

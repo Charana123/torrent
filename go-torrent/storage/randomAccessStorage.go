@@ -2,11 +2,14 @@ package storage
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/binary"
-	"log"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
+
+	underscore "github.com/ahl5esoft/golang-underscore"
 
 	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/boljen/go-bitmap"
@@ -14,154 +17,181 @@ import (
 )
 
 type randomAccessStorage struct {
-	torrent   *torrent.Torrent
-	files     []afero.File
-	fileLocks []*sync.Mutex
+	torrent     *torrent.Torrent
+	fileLocks   []*sync.Mutex
+	files       []afero.File
+	fileOffsets []int
 }
 
 func NewRandomAccessStorage(
 	torrent *torrent.Torrent) Storage {
 
-	storage := &randomAccessStorage{
+	return &randomAccessStorage{
 		torrent: torrent,
 	}
-	storage.init()
-	return storage
 }
 
-func openOrCreateFile(path string) afero.File {
+func openOrCreateFile(path string, length int) afero.File {
 	file, err := openFile(path, os.O_CREATE|os.O_RDWR, 0755)
-	if err != nil {
-		log.Fatalln(err)
-	}
+	fail(err)
+	err = file.Truncate(int64(length))
+	fail(err)
 	return file
 }
 
-func (d *randomAccessStorage) init() {
+func (d *randomAccessStorage) Init() {
 	if len(d.torrent.MetaInfo.Info.Files) > 0 {
 		// Multiple File Mode
 
 		// Create root directory
-		if _, err := appFS.Stat(dd.torrent.MetaInfo.Info.Name); os.IsNotExist(err) {
+		if _, err := appFS.Stat(d.torrent.MetaInfo.Info.Name); os.IsNotExist(err) {
 			err := appFS.Mkdir(d.torrent.MetaInfo.Info.Name, 0755)
 			fail(err)
 		}
 
 		// Create sub-directories and create/open file handlers
-		for _, file := range d.torrent.MetaInfo.Info.Files {
+		offset := 0
+		for fileIndex, file := range d.torrent.MetaInfo.Info.Files {
 			subdir := strings.Join(append([]string{d.torrent.MetaInfo.Info.Name}, file.Path[:len(file.Path)-1]...), "/")
 			if _, err := appFS.Stat(subdir); os.IsNotExist(err) {
 				err := appFS.MkdirAll(subdir, 0755)
 				fail(err)
 			}
 			path := strings.Join(append([]string{d.torrent.MetaInfo.Info.Name}, file.Path...), "/")
-			d.files = append(d.files, openOrCreateFile(path))
+			d.files = append(d.files, openOrCreateFile(path, file.Length))
 			d.fileLocks = append(d.fileLocks, &sync.Mutex{})
+			d.fileOffsets[fileIndex] = offset
+			offset += file.Length
 		}
 
 	} else {
 		// Single File Mode
-		d.files = append(d.files, openOrCreateFile(d.torrent.MetaInfo.Info.Name))
+		file := openOrCreateFile(d.torrent.MetaInfo.Info.Name, d.torrent.MetaInfo.Info.Length)
+		d.files = append(d.files, file)
 		d.fileLocks = append(d.fileLocks, &sync.Mutex{})
+		d.fileOffsets[0] = 0
 	}
 }
 
-func (d *randomAccessStorage) readBlock(fileIndex, offset, length int) ([]byte, error) {
+func (d *randomAccessStorage) find(globalOffset int) (int, int, error) {
+	i := 0
+	j := len(d.files)
+	for i < j {
+		fileIndex := (i + j) / 2
+		if globalOffset >= d.fileOffsets[fileIndex] &&
+			globalOffset < d.fileOffsets[fileIndex]+d.torrent.MetaInfo.Info.Files[fileIndex].Length {
+			fileOffset := globalOffset - d.fileOffsets[fileIndex]
+			return fileIndex, fileOffset, nil
+		}
+		if globalOffset >= d.fileOffsets[fileIndex] {
+			i = fileIndex + 1
+		} else {
+			j = fileIndex
+		}
+	}
+	return 0, 0, fmt.Errorf("File doesn't exist")
+}
+
+func min(i, j int) int {
+	if i < j {
+		return i
+	}
+	return j
+}
+
+func (d *randomAccessStorage) readBlock(fileIndex, fileOffset, blockLength int) ([]byte, error) {
 
 	blockData := &bytes.Buffer{}
-	for length > 0 {
-		var data []byte
-		if offset+length > d.torrent.MetaInfo.Info.Files[fileIndex].Length {
-			data = make([]byte, d.torrent.MetaInfo.Info.Files[fileIndex].Length-offset)
-		} else {
-			data = make([]byte, length)
-		}
-		d.fileLocks[fileIndex].Lock()
-		_, err := d.files[fileIndex].ReadAt(data, int64(offset))
-		d.fileLocks[fileIndex].Unlock()
-		if err != nil {
-			return nil, err
-		}
+	for i := 0; i < 2 && blockLength > 0; i++ {
+		length := min(d.torrent.MetaInfo.Info.Files[fileIndex].Length-fileOffset, blockLength)
+		data := make([]byte, length)
 
+		d.fileLocks[fileIndex].Lock()
+		_, err := d.files[fileIndex].ReadAt(data, int64(fileOffset))
+		d.fileLocks[fileIndex].Unlock()
+		fail(err)
 		binary.Write(blockData, binary.BigEndian, data)
-		length = length - (d.torrent.MetaInfo.Info.Files[fileIndex].Length - offset)
-		offset = 0
+
+		blockLength -= length
 		fileIndex++
+		if fileIndex >= len(d.files) {
+			// If we are required to read beyond the last file
+			// populate the the remainder of the block with 0s
+			binary.Write(blockData, binary.BigEndian, make([]byte, blockLength))
+			break
+		}
+		fileOffset = 0
 	}
 	return blockData.Bytes(), nil
 }
 
-func (d *randomAccessStorage) BlockReadRequest(pieceIndex, blockByteOffset, length int) ([]byte, error) {
-	offset := pieceIndex*d.torrent.MetaInfo.Info.PieceLength + blockByteOffset
-	var err error
-	var block []byte
-	if len(d.torrent.MetaInfo.Info.Files) > 0 {
-		// Multiple File Mode
-		for fileIndex := 0; fileIndex < len(d.torrent.MetaInfo.Info.Files); fileIndex++ {
-			if offset >= d.torrent.MetaInfo.Info.Files[fileIndex].Length-1 {
-				offset -= d.torrent.MetaInfo.Info.Files[fileIndex].Length
-			} else {
-				block, err = d.readBlock(fileIndex, offset, length)
-				break
-			}
-		}
-	} else {
-		// Single File Mode
-		block, err = d.readBlock(0, offset, length)
+func (d *randomAccessStorage) BlockReadRequest(pieceIndex, blockByteOffset, blockLength int) ([]byte, error) {
+	// Generic checks
+	if pieceIndex < 0 || pieceIndex >= d.torrent.NumPieces {
+		return ([]byte)(nil), fmt.Errorf("Invalid piece index")
 	}
+	if blockByteOffset > d.torrent.MetaInfo.Info.PieceLength {
+		return ([]byte)(nil), fmt.Errorf("begin (byte offset within piece) larger than piece")
+	}
+	if blockLength > d.torrent.MetaInfo.Info.PieceLength {
+		return ([]byte)(nil), fmt.Errorf("block size cannot be larger than piece size")
+	}
+
+	globalOffset := pieceIndex*d.torrent.MetaInfo.Info.PieceLength + blockByteOffset
+	fileIndex, fileOffset, err := d.find(globalOffset)
+	fail(err)
+	block, err := d.readBlock(fileIndex, fileOffset, blockLength)
 	if err != nil {
 		return nil, err
 	}
 	return block, nil
 }
 
-func (d *randomAccessStorage) writePiece(fileIndex, offset int, data []byte) error {
+func (d *randomAccessStorage) writePiece(fileIndex, fileOffset int, data []byte) error {
 
-	for len(data) > 0 {
-		var writeLen int
-		if offset+len(data) > d.torrent.MetaInfo.Info.Files[fileIndex].Length {
-			writeLen = d.torrent.MetaInfo.Info.Files[fileIndex].Length - offset
-		} else {
-			writeLen = len(data)
-		}
+	for i := 0; i < 2 && len(data) > 0; i++ {
+		length := min(d.torrent.MetaInfo.Info.Files[fileIndex].Length-fileOffset, len(data))
 		d.fileLocks[fileIndex].Lock()
-		_, err := d.files[fileIndex].WriteAt(data[:writeLen], int64(offset))
+		d.files[fileIndex].WriteAt(data[:length], int64(fileOffset))
 		d.fileLocks[fileIndex].Unlock()
-		if err != nil {
-			return err
-		}
 
-		data = data[writeLen:]
-		offset = 0
+		data = data[length:]
 		fileIndex++
+		if fileIndex >= len(d.files) {
+			// If we are required to read beyond the last file
+			// check the remainder of the block is 0s
+			if !underscore.Chain(data).All(func(b byte) bool { return b == 0 }) {
+				return fmt.Errorf("Malformed block")
+			}
+		}
+		fileOffset = 0
 	}
 	return nil
 }
 
 func (d *randomAccessStorage) WritePieceRequest(pieceIndex int, data []byte) error {
-	offset := pieceIndex * d.torrent.MetaInfo.Info.PieceLength
-	var err error
-	if len(d.torrent.MetaInfo.Info.Files) > 0 {
-		// Multiple File Mode
-		for fileIndex := 0; fileIndex < len(d.torrent.MetaInfo.Info.Files); fileIndex++ {
-			if offset >= d.torrent.MetaInfo.Info.Files[fileIndex].Length-1 {
-				offset -= d.torrent.MetaInfo.Info.Files[fileIndex].Length
-			} else {
-				err = d.writePiece(fileIndex, offset, data)
-				break
-			}
-		}
-	} else {
-		// Single File Mode
-		err = d.writePiece(0, offset, data)
-	}
+	globalOffset := pieceIndex * d.torrent.MetaInfo.Info.PieceLength
+	fileIndex, fileOffset, err := d.find(globalOffset)
+	fail(err)
+	err = d.writePiece(fileIndex, fileOffset, data)
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (d *randomAccessStorage) GetDownloadState() (bitmap.Bitmap, bool) {
+func (d *randomAccessStorage) GetCurrentDownloadState() (bitmap.Bitmap, bool) {
 	clientBitfield := bitmap.New(d.torrent.NumPieces)
-	return (bitmap.Bitmap)(nil), false
+	// read pieces sequentially, validating the checksums
+	for pieceIndex := 0; pieceIndex < d.torrent.NumPieces; pieceIndex++ {
+		piece, err := d.BlockReadRequest(pieceIndex, 0, d.torrent.MetaInfo.Info.PieceLength)
+		fail(err)
+		expectedChecksum := []byte(d.torrent.MetaInfo.Info.Pieces)[pieceIndex*20 : (pieceIndex+1)*20]
+		actualChecksum := sha1.Sum(piece)
+		if bytes.Equal(expectedChecksum, actualChecksum[:]) {
+			clientBitfield.Set(pieceIndex, true)
+		}
+	}
+	completed := underscore.Chain(clientBitfield.Data(false)).All(func(b byte) bool { return b == 1 })
+	return clientBitfield, completed
 }

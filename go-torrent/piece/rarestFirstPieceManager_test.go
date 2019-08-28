@@ -7,7 +7,7 @@ import (
 
 	"github.com/boljen/go-bitmap"
 
-	"github.com/Charana123/torrent/go-torrent/disk"
+	"github.com/Charana123/torrent/go-torrent/storage"
 	"github.com/Charana123/torrent/go-torrent/wire"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -16,7 +16,7 @@ import (
 )
 
 type mockDisk struct {
-	disk.Disk
+	storage.Storage
 	mock.Mock
 }
 

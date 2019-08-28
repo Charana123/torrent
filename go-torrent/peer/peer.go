@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Charana123/torrent/go-torrent/disk"
 	"github.com/Charana123/torrent/go-torrent/piece"
+	"github.com/Charana123/torrent/go-torrent/storage"
 	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
@@ -39,7 +39,7 @@ type peer struct {
 	id                    string
 	state                 connState
 	closed                bool
-	disk                  disk.Disk
+	storage               storage.Storage
 	torrent               *torrent.Torrent
 	wire                  wire.Wire
 	peerMgr               PeerManager
@@ -59,7 +59,7 @@ func NewPeer(
 	id string,
 	wire wire.Wire,
 	torrent *torrent.Torrent,
-	disk disk.Disk,
+	storage storage.Storage,
 	peerMgr PeerManager,
 	pieceMgr piece.PieceManager) *peer {
 
@@ -67,7 +67,7 @@ func NewPeer(
 		id:                    id,
 		wire:                  wire,
 		torrent:               torrent,
-		disk:                  disk,
+		storage:               storage,
 		peerMgr:               peerMgr,
 		pieceMgr:              pieceMgr,
 		readRequestCancelChan: make(map[string]chan int),
@@ -209,7 +209,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 					return
 				case <-time.After(time.Duration(BLOCK_READ_REQUEST_DELAY) * time.Second):
 					delete(p.readRequestCancelChan, requestID)
-					block, err := p.disk.BlockReadRequest(pieceIndex, blockByteOffset, length)
+					block, err := p.storage.BlockReadRequest(pieceIndex, blockByteOffset, length)
 					if err != nil {
 						p.Stop()
 						return
