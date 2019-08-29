@@ -2,13 +2,11 @@ package piece
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
 	"sort"
 	"sync"
 
-	"github.com/Charana123/torrent/go-torrent/storage"
 	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
@@ -20,7 +18,6 @@ type rarestFirst struct {
 	clientBitField bitmap.Bitmap
 	tor            *torrent.Torrent
 	numBlocks      int
-	storage        storage.Storage
 	peerToPiece    map[string]int
 	pieceInfo      []*pieceInfo
 }
@@ -41,14 +38,12 @@ type blockInfo struct {
 
 func NewRarestFirstPieceManager(
 	tor *torrent.Torrent,
-	storage storage.Storage,
 	clientBitField bitmap.Bitmap) PieceManager {
 
 	pm := &rarestFirst{
 		clientBitField: clientBitField,
 		tor:            tor,
 		numBlocks:      tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
-		storage:        storage,
 		peerToPiece:    make(map[string]int),
 	}
 
@@ -114,20 +109,19 @@ func (pm *rarestFirst) PieceHave(id string, pieceIndex int) {
 	pm.pieceInfo[pieceIndex].availabilty++
 }
 
-func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []byte) error {
+func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []byte) (bool, []byte, mapset.Set, error) {
 	pm.Lock()
 	defer pm.Unlock()
 
-	// TODO: add more checks
 	// Check pieceIndex and blockIndex and set block as downloaded
 	if pi, ok := pm.peerToPiece[id]; !ok || pi != pieceIndex {
-		return fmt.Errorf("downloaded block from incorrent piece")
+		return false, ([]byte)(nil), (mapset.Set)(nil), fmt.Errorf("downloaded block from incorrent piece")
 	}
 	if !pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading {
-		return fmt.Errorf("downloaded incorrent block")
+		return false, ([]byte)(nil), (mapset.Set)(nil), fmt.Errorf("downloaded incorrent block")
 	}
 	if len(data) != BLOCK_SIZE {
-		return fmt.Errorf("incorrent block size")
+		return false, ([]byte)(nil), (mapset.Set)(nil), fmt.Errorf("incorrent block size")
 	}
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloaded = true
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading = false
@@ -138,19 +132,8 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	for i := len(pm.pieceInfo[pieceIndex].blocks) - 1; i >= 0; i-- {
 		block := pm.pieceInfo[pieceIndex].blocks[i]
 		if !block.downloaded {
-			return nil
+			return false, ([]byte)(nil), (mapset.Set)(nil), nil
 		}
-	}
-
-	// Check piece's checksum
-	piece := &bytes.Buffer{}
-	for _, block := range pm.pieceInfo[pieceIndex].blocks {
-		binary.Write(piece, binary.BigEndian, block.data)
-	}
-	expected_checksum := []byte(pm.tor.MetaInfo.Info.Pieces[20*pieceIndex : 20*(pieceIndex+1)])
-	actual_checksum := sha1.Sum(piece.Bytes())
-	if !bytes.Equal(actual_checksum[:], expected_checksum[:]) {
-		return fmt.Errorf("checksum failed")
 	}
 
 	// Write piece to disk
@@ -158,9 +141,13 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	pm.pieceInfo[pieceIndex].downloading = false
 	delete(pm.peerToPiece, id)
 	pm.clientBitField.Set(pieceIndex, true)
-	pm.storage.WritePieceRequest(pieceIndex, piece.Bytes())
 
-	return nil
+	// Check piece's checksum
+	piece := &bytes.Buffer{}
+	for _, block := range pm.pieceInfo[pieceIndex].blocks {
+		binary.Write(piece, binary.BigEndian, block.data)
+	}
+	return false, piece.Bytes(), pm.pieceInfo[pieceIndex].peers, nil
 }
 
 func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) error {

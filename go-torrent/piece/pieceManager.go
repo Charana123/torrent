@@ -3,6 +3,7 @@ package piece
 import (
 	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
+	mapset "github.com/deckarep/golang-set"
 )
 
 var (
@@ -11,10 +12,10 @@ var (
 )
 
 type PieceManager interface {
-	GetBitField() []byte
+	GetBitField() (clientBitfield []byte)
 	PeerChoked(id string)
 	PeerStopped(id string, peerBitfield *bitmap.Bitmap)
 	PieceHave(id string, pieceIndex int)
-	WriteBlock(id string, pieceIndex, blockIndex int, data []byte) error
-	SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) error
+	WriteBlock(id string, pieceIndex, blockIndex int, data []byte) (downloadedPiece bool, piece []byte, peers mapset.Set, err error)
+	SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) (err error)
 }

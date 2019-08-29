@@ -1,7 +1,6 @@
 package tracker
 
 import (
-	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
@@ -65,9 +64,7 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	if event != STOPPED {
 		for i := 0; i < len(peerAddrs); i += 6 {
 			ip := net.IPv4(peerAddrs[i+0], peerAddrs[i+1], peerAddrs[i+2], peerAddrs[i+3])
-			port := binary.BigEndian.Uint16(peerAddrs[i+4 : i+6])
-			id := fmt.Sprintf("%s:%d", ip.String(), port)
-			tr.peerMgr.AddPeer(id, nil)
+			tr.peerMgr.AddPeer(ip.String(), nil)
 		}
 	}
 	return nil

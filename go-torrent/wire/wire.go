@@ -34,6 +34,7 @@ type Wire interface {
 	SendUnchoke() error
 	SendInterested() error
 	SendUnInterested() error
+	SendHave(pieceIndex int) error
 	SendBitField(bitfield []byte) error
 	SendRequest(pieceIndex, begin, length int) error
 	SendBlock(pieceIndex, begin int, block []byte) error
@@ -74,7 +75,15 @@ func (w *wire) GetLastMessageSent() time.Time {
 
 func (w *wire) SendKeepAlive() error {
 	b := &bytes.Buffer{}
-	binary.Write(b, binary.BigEndian, int(1))
+	binary.Write(b, binary.BigEndian, int32(1))
+	return w.sendMessage(b.Bytes())
+}
+
+func (w *wire) SendHave(pieceIndex int) error {
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, int32(5))
+	binary.Write(b, binary.BigEndian, uint8(4))
+	binary.Write(b, binary.BigEndian, int32(pieceIndex))
 	return w.sendMessage(b.Bytes())
 }
 

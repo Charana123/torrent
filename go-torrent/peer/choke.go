@@ -17,15 +17,15 @@ const (
 )
 
 type PeerInfo struct {
-	id    string
-	wire  wire.Wire
-	state struct {
+	ID    string
+	Wire  wire.Wire
+	State struct {
 		peerInterested   bool
 		clientInterested bool
 		peerChoking      bool
 		clientChoking    bool
 	}
-	lastPiece     int64
+	LastPiece     int64
 	speed         int
 	shouldUnchoke bool
 	snubbedClient bool
@@ -69,14 +69,14 @@ func (c *choke) choke() {
 	notInterested := make([]*PeerInfo, 0)
 	for _, peer := range peers {
 		if c.seeding {
-			peer.speed = peerStats[peer.id].UploadRate
+			peer.speed = peerStats[peer.ID].UploadRate
 		} else {
-			peer.speed = peerStats[peer.id].DownloadRate
+			peer.speed = peerStats[peer.ID].DownloadRate
 		}
-		if time.Now().Unix()-peer.lastPiece > SNUBBED_PERIOD {
+		if time.Now().Unix()-peer.LastPiece > SNUBBED_PERIOD {
 			peer.snubbedClient = true
 		}
-		if peer.state.peerInterested && !peer.snubbedClient {
+		if peer.State.peerInterested && !peer.snubbedClient {
 			interested = append(interested, peer)
 		} else {
 			notInterested = append(notInterested, peer)
@@ -91,7 +91,7 @@ func (c *choke) choke() {
 	// (keep the client unchoked) i.e. choose the client as one their 4 active downloaders
 	speedThreshold := 0
 	for i := 0; i < len(interested) && i < DOWNLOADERS-1; i++ {
-		fmt.Println("interested peer id: ", interested[i].id)
+		fmt.Println("interested peer id: ", interested[i].ID)
 		interested[i].shouldUnchoke = true
 		speedThreshold = interested[i].speed
 	}
@@ -111,7 +111,7 @@ func (c *choke) choke() {
 			interested[i], interested[j] = interested[j], interested[i]
 		})
 		for _, peer := range interested {
-			if peer.state.peerInterested {
+			if peer.State.peerInterested {
 				peer.shouldUnchoke = true
 				break
 			}
@@ -120,13 +120,13 @@ func (c *choke) choke() {
 
 	// apply unchoke/choke
 	for _, peer := range peers {
-		if peer.shouldUnchoke && peer.state.clientChoking {
-			peer.wire.SendUnchoke()
+		if peer.shouldUnchoke && peer.State.clientChoking {
+			peer.Wire.SendUnchoke()
 		}
 		// keep choking and the client is currently not choking
 		// then choke
-		if !peer.shouldUnchoke && !peer.state.clientChoking {
-			peer.wire.SendChoke()
+		if !peer.shouldUnchoke && !peer.State.clientChoking {
+			peer.Wire.SendChoke()
 		}
 	}
 }

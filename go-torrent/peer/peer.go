@@ -2,6 +2,7 @@ package peer
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -22,24 +23,13 @@ var (
 )
 
 type Peer interface {
+	Start()
 	Stop()
 	GetPeerInfo() (id string, state connState, wire wire.Wire, lastPiece int64)
+	GetWire() wire.Wire
 }
 
 var newWire = wire.NewWire
-
-func (p *peer) Stop() {
-	go func() {
-		p.peerMgr.RemovePeer(p.id)
-		p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
-	}()
-	p.closed = true
-	p.wire.Close()
-}
-
-func (p *peer) GetPeerInfo() (string, connState, wire.Wire, int64) {
-	return p.id, p.state, p.wire, p.lastPiece
-}
 
 type peer struct {
 	id                    string
@@ -81,14 +71,30 @@ func NewPeer(
 		pieceMgr:              pieceMgr,
 		readRequestCancelChan: make(map[string]chan int),
 	}
-	go peer.start()
 	return peer
 }
 
-func (p *peer) start() {
+func (p *peer) GetWire() wire.Wire {
+	return p.wire
+}
+
+func (p *peer) Stop() {
+	go func() {
+		p.peerMgr.RemovePeer(p.id)
+		p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
+	}()
+	p.closed = true
+	p.wire.Close()
+}
+
+func (p *peer) GetPeerInfo() (string, connState, wire.Wire, int64) {
+	return p.id, p.state, p.wire, p.lastPiece
+}
+
+func (p *peer) Start() {
 	if p.wire == nil {
 		conn, err := net.Dial("tcp4", p.id)
-		if err != nil {
+		if !p.closed && err != nil {
 			p.Stop()
 			return
 		}
@@ -105,9 +111,10 @@ func (p *peer) start() {
 
 	// recieve handshake
 	length, protocol, infoHash, _, err2 := p.wire.ReadHandshake()
-	if length != 19 ||
-		protocol != "BitTorrent protocol" ||
-		!bytes.Equal(infoHash, p.torrent.InfoHash) {
+	if !p.closed &&
+		(length != 19 ||
+			protocol != "BitTorrent protocol" ||
+			!bytes.Equal(infoHash, p.torrent.InfoHash)) {
 		p.Stop()
 		return
 	}
@@ -187,7 +194,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			if !p.state.clientInterested {
 				p.state.clientInterested = true
 				err := p.wire.SendInterested()
-				if err != nil {
+				if !p.closed && err != nil {
 					p.Stop()
 					return
 				}
@@ -234,12 +241,12 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				case <-time.After(time.Duration(BLOCK_READ_REQUEST_DELAY) * time.Second):
 					delete(p.readRequestCancelChan, requestID)
 					block, err := p.storage.BlockReadRequest(pieceIndex, blockByteOffset, length)
-					if err != nil {
+					if !p.closed && err != nil {
 						p.Stop()
 						return
 					}
 					err = p.wire.SendBlock(pieceIndex, blockByteOffset, block)
-					if err != nil {
+					if !p.closed && err != nil {
 						p.Stop()
 						return
 					}
@@ -249,8 +256,10 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			p.readRequestCancelChan[requestID] = quit
 		} else {
 			log.Println("peer sent request when client was choking or peer wasn't interested")
-			p.Stop()
-			return
+			if !p.closed {
+				p.Stop()
+				return
+			}
 		}
 	case wire.BLOCK:
 		var pieceIndex int
@@ -263,11 +272,21 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 
 		blockIndex := blockByteOffset / piece.BLOCK_SIZE
 		go func() {
-			err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
-			if err != nil {
-				log.Println(err)
+			downloadedPiece, piece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
+			if !p.closed && err != nil {
 				p.Stop()
 				return
+			}
+			if downloadedPiece {
+				expectedChecksum := []byte(p.torrent.MetaInfo.Info.Pieces[20*pieceIndex : 20*(pieceIndex+1)])
+				actualChecksum := sha1.Sum(piece)
+				if !bytes.Equal(expectedChecksum[:], actualChecksum[:]) {
+					p.peerMgr.BanPeers(peers)
+					p.Stop()
+					return
+				}
+				p.storage.WritePieceRequest(pieceIndex, piece)
+				p.peerMgr.BroadcastHave(pieceIndex)
 			}
 			p.stats.UpdatePeer(p.id, blockLength, 0)
 			p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
@@ -288,8 +307,10 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		} else {
 			log.Println("peer sent cancel when client was choking or peer wasn't interested")
-			p.Stop()
-			return
+			if !p.closed {
+				p.Stop()
+				return
+			}
 		}
 	case wire.PORT:
 		// TODO: DHT (BEP 0005)

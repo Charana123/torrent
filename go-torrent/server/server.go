@@ -54,7 +54,8 @@ func (sv *server) Serve() {
 					sig <- 1
 					return
 				}
-				sv.pm.AddPeer(conn.RemoteAddr().String(), conn)
+				tcpAddr := conn.RemoteAddr().(*net.TCPAddr)
+				sv.pm.AddPeer(tcpAddr.IP.String(), conn)
 				sig <- 0
 			}()
 
