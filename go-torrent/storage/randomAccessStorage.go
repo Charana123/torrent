@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"sync"
@@ -26,7 +27,8 @@ type randomAccessStorage struct {
 
 func NewRandomAccessStorage(
 	torrent *torrent.Torrent) Storage {
-
+	var b map[int]int
+	b[0] = 1
 	return &randomAccessStorage{
 		torrent: torrent,
 	}
@@ -92,7 +94,12 @@ func (d *randomAccessStorage) find(globalOffset int) (int, int, error) {
 		} else {
 			j = fileIndex
 		}
+		var i interface{}
+		i = net.TCPConn{}
+		j := i.(net.TCPConn)
+		fmt.Println(j)
 	}
+
 	return 0, 0, fmt.Errorf("File doesn't exist")
 }
 

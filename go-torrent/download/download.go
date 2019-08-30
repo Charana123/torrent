@@ -62,7 +62,7 @@ func (d *download) Start(path string) error {
 	go storage.Init()
 	clientBitfield, _, left := storage.GetCurrentDownloadState()
 	stats := stats.NewStats(0, 0, left)
-	pieceMgr := piece.NewRarestFirstPieceManager(t, storage, clientBitfield)
+	pieceMgr := piece.NewRarestFirstPieceManager(t, clientBitfield)
 	d.peerMgr = peer.NewPeerManager(t, pieceMgr, storage, stats)
 	sv, err := server.NewServer(d.peerMgr, quit)
 	go sv.Serve()
