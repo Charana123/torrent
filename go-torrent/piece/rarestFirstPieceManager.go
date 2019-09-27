@@ -2,10 +2,14 @@ package piece
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
+
+	"github.com/Charana123/torrent/go-torrent/storage"
 
 	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/Charana123/torrent/go-torrent/wire"
@@ -15,11 +19,14 @@ import (
 
 type rarestFirst struct {
 	sync.RWMutex
-	clientBitField bitmap.Bitmap
-	tor            *torrent.Torrent
-	numBlocks      int
-	peerToPiece    map[string]int
-	pieceInfo      []*pieceInfo
+	clientBitField      bitmap.Bitmap
+	tor                 *torrent.Torrent
+	numBlocks           int
+	numBlockInLastPiece int
+	lengthOfLastBlock   int
+	peerToPiece         map[string]int
+	pieceInfo           []*pieceInfo
+	storage             storage.Storage
 }
 
 type pieceInfo struct {
@@ -38,21 +45,34 @@ type blockInfo struct {
 
 func NewRarestFirstPieceManager(
 	tor *torrent.Torrent,
+	storage storage.Storage,
 	clientBitField bitmap.Bitmap) PieceManager {
 
+	bytesInLastPiece := tor.Length - ((tor.NumPieces - 1) * tor.MetaInfo.Info.PieceLength)
+	numBlocksInLastPiece := int(math.Ceil(float64(bytesInLastPiece) / float64(BLOCK_SIZE)))
+	lengthOfLastBlock := bytesInLastPiece - (numBlocksInLastPiece-1)*BLOCK_SIZE
 	pm := &rarestFirst{
-		clientBitField: clientBitField,
-		tor:            tor,
-		numBlocks:      tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
-		peerToPiece:    make(map[string]int),
+		clientBitField:      clientBitField,
+		tor:                 tor,
+		storage:             storage,
+		numBlocks:           tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
+		numBlockInLastPiece: numBlocksInLastPiece,
+		lengthOfLastBlock:   lengthOfLastBlock,
+		peerToPiece:         make(map[string]int),
 	}
 
 	pis := make([]*pieceInfo, 0)
 	for i := 0; i < pm.tor.NumPieces; i++ {
 		pi := &pieceInfo{}
 		pi.blocks = make([]*blockInfo, 0)
-		for j := 0; j < pm.numBlocks; j++ {
-			pi.blocks = append(pi.blocks, &blockInfo{})
+		if i == pm.tor.NumPieces-1 {
+			for j := 0; j < pm.numBlockInLastPiece; j++ {
+				pi.blocks = append(pi.blocks, &blockInfo{})
+			}
+		} else {
+			for j := 0; j < pm.numBlocks; j++ {
+				pi.blocks = append(pi.blocks, &blockInfo{})
+			}
 		}
 		pi.peers = mapset.NewSet()
 		pis = append(pis, pi)
@@ -111,19 +131,20 @@ func (pm *rarestFirst) PieceHave(id string, pieceIndex int) {
 	pm.pieceInfo[pieceIndex].availabilty++
 }
 
-func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []byte) (bool, []byte, mapset.Set, error) {
+func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []byte) (bool, mapset.Set, error) {
 	pm.Lock()
 	defer pm.Unlock()
 
 	// Check pieceIndex and blockIndex and set block as downloaded
 	if pi, ok := pm.peerToPiece[id]; !ok || pi != pieceIndex {
-		return false, ([]byte)(nil), (mapset.Set)(nil), fmt.Errorf("downloaded block from incorrent piece")
+		return false, (mapset.Set)(nil), fmt.Errorf("downloaded block from incorrent piece")
 	}
 	if !pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading {
-		return false, ([]byte)(nil), (mapset.Set)(nil), fmt.Errorf("downloaded incorrent block")
+		return false, (mapset.Set)(nil), fmt.Errorf("downloaded incorrent block")
 	}
-	if len(data) != BLOCK_SIZE {
-		return false, ([]byte)(nil), (mapset.Set)(nil), fmt.Errorf("incorrent block size")
+	if ((pieceIndex != pm.tor.NumPieces-1 || blockIndex != pm.numBlockInLastPiece-1) && len(data) != BLOCK_SIZE) ||
+		((pieceIndex == pm.tor.NumPieces-1 && blockIndex == pm.numBlockInLastPiece-1) && len(data) != pm.lengthOfLastBlock) {
+		return false, (mapset.Set)(nil), fmt.Errorf("incorrent block size")
 	}
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloaded = true
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading = false
@@ -134,22 +155,42 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	for i := 0; i < len(pm.pieceInfo[pieceIndex].blocks); i++ {
 		block := pm.pieceInfo[pieceIndex].blocks[i]
 		if !block.downloaded {
-			return false, ([]byte)(nil), (mapset.Set)(nil), nil
+			return false, (mapset.Set)(nil), nil
 		}
 	}
-
-	// Write piece to disk
-	pm.pieceInfo[pieceIndex].downloaded = true
-	pm.pieceInfo[pieceIndex].downloading = false
-	delete(pm.peerToPiece, id)
-	pm.clientBitField.Set(pieceIndex, true)
 
 	// Check piece's checksum
 	piece := &bytes.Buffer{}
 	for _, block := range pm.pieceInfo[pieceIndex].blocks {
 		binary.Write(piece, binary.BigEndian, block.data)
 	}
-	return true, piece.Bytes(), pm.pieceInfo[pieceIndex].peers, nil
+	pieceData := piece.Bytes()
+	expectedChecksum := []byte(pm.tor.MetaInfo.Info.Pieces[20*pieceIndex : 20*(pieceIndex+1)])
+	actualChecksum := sha1.Sum(pieceData)
+	if !bytes.Equal(expectedChecksum[:], actualChecksum[:]) {
+		return true, pm.pieceInfo[pieceIndex].peers, fmt.Errorf("Checksum invalid")
+	}
+
+	// Write piece to disk
+	err := pm.storage.WritePieceRequest(pieceIndex, pieceData)
+	if err != nil {
+		return true, nil, err
+	}
+
+	// Set piece as downloaded
+	pm.pieceInfo[pieceIndex].downloaded = true
+	pm.pieceInfo[pieceIndex].downloading = false
+	delete(pm.peerToPiece, id)
+	pm.clientBitField.Set(pieceIndex, true)
+
+	piecesToDownload := pm.tor.NumPieces
+	for i := 0; i < pm.tor.NumPieces; i++ {
+		if pm.clientBitField.Get(i) {
+			piecesToDownload--
+		}
+	}
+
+	return true, pm.pieceInfo[pieceIndex].peers, nil
 }
 
 func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) error {
@@ -169,7 +210,7 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 		// being downloaded by another peer
 		pieces := make([]int, 0)
 		for pieceIndex := 0; pieceIndex < peerBitfield.Len(); pieceIndex++ {
-			if peerBitfield.Get(pieceIndex) {
+			if peerBitfield.Get(pieceIndex) && !pm.clientBitField.Get(pieceIndex) {
 				if !pm.pieceInfo[pieceIndex].downloaded && !pm.pieceInfo[pieceIndex].downloading {
 					pieces = append(pieces, pieceIndex)
 				}
@@ -192,8 +233,12 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 
 	for blockIndex, block := range pm.pieceInfo[pieceIndex].blocks {
 		if !block.downloaded && !block.downloading {
-			fmt.Println("Sending Request", id, pieceIndex, blockIndex)
-			err := wire.SendRequest(pieceIndex, blockIndex*BLOCK_SIZE, BLOCK_SIZE)
+			var err error
+			if pieceIndex == pm.tor.NumPieces-1 && blockIndex == pm.numBlockInLastPiece-1 {
+				err = wire.SendRequest(pieceIndex, blockIndex*BLOCK_SIZE, pm.lengthOfLastBlock)
+			} else {
+				err = wire.SendRequest(pieceIndex, blockIndex*BLOCK_SIZE, BLOCK_SIZE)
+			}
 			if err != nil {
 				return err
 			}

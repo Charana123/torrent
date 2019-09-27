@@ -89,8 +89,6 @@ func (d *randomAccessStorage) find(globalOffset int) (int, int, error) {
 		if globalOffset >= d.fileOffsets[fileIndex] &&
 			globalOffset < d.fileOffsets[fileIndex]+d.torrent.MetaInfo.Info.Files[fileIndex].Length {
 			fileOffset := globalOffset - d.fileOffsets[fileIndex]
-			fmt.Println("fileIndex", fileIndex)
-			fmt.Println("fileOffset", fileOffset)
 			return fileIndex, fileOffset, nil
 		}
 		if globalOffset >= d.fileOffsets[fileIndex] {
@@ -124,11 +122,11 @@ func (d *randomAccessStorage) readBlock(fileIndex, fileOffset, blockLength int) 
 
 		blockLength -= length
 		fileIndex++
-		if fileIndex >= len(d.files) {
-			// If we are required to read beyond the last file
-			// populate the the remainder of the block with 0s
-			binary.Write(blockData, binary.BigEndian, make([]byte, blockLength))
+		if blockLength == 0 {
 			break
+		}
+		if fileIndex >= len(d.files) {
+			return ([]byte)(nil), fmt.Errorf("reading beyond end of last file")
 		}
 		fileOffset = 0
 	}
@@ -168,11 +166,7 @@ func (d *randomAccessStorage) writePiece(fileIndex, fileOffset int, data []byte)
 		data = data[length:]
 		fileIndex++
 		if fileIndex >= len(d.files) {
-			// If we are required to read beyond the last file
-			// check the remainder of the block is 0s
-			if !underscore.Chain(data).All(func(b byte) bool { return b == 0 }) {
-				return fmt.Errorf("Malformed block")
-			}
+			return fmt.Errorf("writing beyond end of last file")
 		}
 		fileOffset = 0
 	}
@@ -194,7 +188,14 @@ func (d *randomAccessStorage) GetCurrentDownloadState() (bitmap.Bitmap, bool, in
 	clientBitfield := bitmap.New(d.torrent.NumPieces)
 	// read pieces sequentially, validating the checksums
 	for pieceIndex := 0; pieceIndex < d.torrent.NumPieces; pieceIndex++ {
-		piece, err := d.BlockReadRequest(pieceIndex, 0, d.torrent.MetaInfo.Info.PieceLength)
+		var piece []byte
+		var err error
+		if pieceIndex == d.torrent.NumPieces-1 {
+			bytesInLastPiece := d.torrent.Length - ((d.torrent.NumPieces - 1) * d.torrent.MetaInfo.Info.PieceLength)
+			piece, err = d.BlockReadRequest(pieceIndex, 0, bytesInLastPiece)
+		} else {
+			piece, err = d.BlockReadRequest(pieceIndex, 0, d.torrent.MetaInfo.Info.PieceLength)
+		}
 		fail(err)
 		expectedChecksum := []byte(d.torrent.MetaInfo.Info.Pieces)[pieceIndex*20 : (pieceIndex+1)*20]
 		actualChecksum := sha1.Sum(piece)

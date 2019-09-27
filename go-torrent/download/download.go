@@ -63,7 +63,7 @@ func (d *download) Start(path string) error {
 	storage.Init()
 	clientBitfield, _, left := storage.GetCurrentDownloadState()
 	stats := stats.NewStats(0, 0, left)
-	pieceMgr := piece.NewRarestFirstPieceManager(t, clientBitfield)
+	pieceMgr := piece.NewRarestFirstPieceManager(t, storage, clientBitfield)
 	d.peerMgr = peer.NewPeerManager(t, pieceMgr, storage, stats)
 	choke := peer.NewChoke(d.peerMgr, stats, quit)
 	go choke.Start()

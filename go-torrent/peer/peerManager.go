@@ -69,9 +69,11 @@ func (pm *peerManager) BroadcastHave(pieceIndex int) {
 	pm.RLock()
 	defer pm.RUnlock()
 
-	fmt.Println("Broadcast Have", pieceIndex)
 	for _, peer := range pm.peers {
-		peer.GetWire().SendHave(pieceIndex)
+		wire := peer.GetWire()
+		if wire != nil {
+			wire.SendHave(pieceIndex)
+		}
 	}
 }
 
@@ -80,7 +82,7 @@ func (pm *peerManager) StopPeers() {
 	defer pm.RUnlock()
 
 	for _, peer := range pm.peers {
-		peer.Stop()
+		peer.Stop(fmt.Errorf("Peer gracefully shutdown"), nil)
 	}
 }
 

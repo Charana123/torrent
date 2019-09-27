@@ -64,7 +64,6 @@ func NewTracker(
 }
 
 func (tr *tracker) announceTracker(trackerURL string) error {
-	fmt.Println("announceTracker", trackerURL)
 
 	var queryTracker func(string, int) error
 	if trackerURL[:6] == "udp://" {
@@ -76,14 +75,12 @@ func (tr *tracker) announceTracker(trackerURL string) error {
 	}
 
 	for {
-		fmt.Println("tr.announceResp.Interval", tr.announceResp.Interval)
 		select {
 		case <-tr.quit:
 			queryTracker(trackerURL, STOPPED)
 			return nil
 		case <-time.After(time.Second * time.Duration(tr.announceResp.Interval)):
 			err := queryTracker(trackerURL, NONE)
-			fmt.Println(err)
 			if err != nil {
 				return err
 			}
@@ -94,10 +91,10 @@ func (tr *tracker) announceTracker(trackerURL string) error {
 func (tr *tracker) Start() {
 	for {
 		if len(tr.torrent.MetaInfo.AnnounceList) > 0 {
+			tr.torrent.MetaInfo.AnnounceList = tr.torrent.MetaInfo.AnnounceList[1:]
 			for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
 				for i, trackerURL := range trackerURLs {
 					err := tr.announceTracker(trackerURL)
-					// fmt.Println("error", err)
 					// tracker must stop
 					if err == nil {
 						return

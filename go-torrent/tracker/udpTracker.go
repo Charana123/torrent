@@ -10,6 +10,7 @@ import (
 	"math/rand"
 	"net"
 	"strings"
+	"time"
 
 	"github.com/Charana123/torrent/go-torrent/torrent"
 )
@@ -27,9 +28,7 @@ func (tr *tracker) queryUDPTracker(trackerURL string, event int) error {
 		return err
 	}
 
-	fmt.Println("connecting...")
 	connectionID, err := tr.connectUDP(trackerConn)
-	fmt.Println("ConnectionID", connectionID)
 	if err != nil {
 		return err
 	}
@@ -95,22 +94,22 @@ func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID
 	binary.Write(announceRequest, binary.BigEndian, int32(event))
 	binary.Write(announceRequest, binary.BigEndian, int32(0)) // defualt
 	binary.Write(announceRequest, binary.BigEndian, tr.key)
-	binary.Write(announceRequest, binary.BigEndian, int32(tr.numwant))
+	binary.Write(announceRequest, binary.BigEndian, int32(-1))
 	binary.Write(announceRequest, binary.BigEndian, uint16(tr.serverPort))
 
 	trackerConn.Write(announceRequest.Bytes())
 
-	fmt.Println("numwant", tr.numwant)
-	data := make([]byte, 20+6*tr.numwant)
-	n, err := io.ReadFull(trackerConn, data)
-	if err != nil {
+	announceResponse := &bytes.Buffer{}
+	trackerConn.SetDeadline(time.Now().Add(time.Second * 2))
+	n, err := io.Copy(announceResponse, trackerConn)
+	if err, ok := err.(net.Error); !ok || !err.Timeout() {
 		return err
 	}
 	if n < 20 {
 		return fmt.Errorf("Malformed announce response body")
 	}
 
-	announceResponse := bytes.NewBuffer(data)
+	// announceResponse := bytes.NewBuffer(data)
 	var actionResp int32
 	binary.Read(announceResponse, binary.BigEndian, &actionResp)
 	if actionResp != 1 {
@@ -135,7 +134,6 @@ func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID
 			ip := net.IPv4(peerAddrs[i+0], peerAddrs[i+1], peerAddrs[i+2], peerAddrs[i+3])
 			port := binary.BigEndian.Uint16([]byte(peerAddrs[i+4 : i+6]))
 			id := fmt.Sprintf("%s:%d", ip, port)
-			fmt.Println("id", i/6, id)
 			tr.peerMgr.AddPeer(id, nil)
 		}
 	}

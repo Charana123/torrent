@@ -16,6 +16,6 @@ type PieceManager interface {
 	PeerChoked(id string)
 	PeerStopped(id string, peerBitfield *bitmap.Bitmap)
 	PieceHave(id string, pieceIndex int)
-	WriteBlock(id string, pieceIndex, blockIndex int, data []byte) (downloadedPiece bool, piece []byte, peers mapset.Set, err error)
+	WriteBlock(id string, pieceIndex, blockIndex int, data []byte) (downloadedPiece bool, bannedPeers mapset.Set, err error)
 	SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) (err error)
 }

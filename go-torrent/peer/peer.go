@@ -2,11 +2,9 @@ package peer
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"strconv"
 	"time"
@@ -25,7 +23,7 @@ var (
 
 type Peer interface {
 	Start()
-	Stop()
+	Stop(err error, preFunc func()) bool
 	GetPeerInfo() (id string, state connState, wire wire.Wire, lastPiece int64)
 	GetWire() wire.Wire
 }
@@ -87,16 +85,22 @@ func (p *peer) GetWire() wire.Wire {
 	return p.wire
 }
 
-func (p *peer) Stop() {
-	go func() {
-		p.peerMgr.RemovePeer(p.id)
-		p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
-	}()
-	p.closed = true
-	if p.wire != nil {
-		fmt.Println("client stopped")
-		p.wire.Close()
+func (p *peer) Stop(err error, preFunc func()) bool {
+	if !p.closed && err != nil {
+		if preFunc != nil {
+			preFunc()
+		}
+		go func() {
+			p.peerMgr.RemovePeer(p.id)
+			p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
+		}()
+		if p.wire != nil {
+			p.wire.Close()
+		}
+		p.closed = true
+		return true
 	}
+	return false
 }
 
 func (p *peer) GetPeerInfo() (string, connState, wire.Wire, int64) {
@@ -106,34 +110,30 @@ func (p *peer) GetPeerInfo() (string, connState, wire.Wire, int64) {
 func (p *peer) Start() {
 	if p.wire == nil {
 		conn, err := net.DialTimeout("tcp4", p.id, time.Duration(2*time.Second))
-		if !p.closed && err != nil {
-			p.Stop()
+		if p.Stop(err, nil) {
 			return
 		}
-		p.wire = newWire(conn.(*net.TCPConn), time.Duration(time.Second*2))
+		p.wire = newWire(conn.(*net.TCPConn), time.Duration(time.Minute*2))
 	}
-	fmt.Println(p.id, "connected")
 
 	// send handshake
 	err := p.wire.SendHandshake(19, "BitTorrent protocol", p.torrent.InfoHash, torrent.PEER_ID)
-	if !p.closed && err != nil {
-		p.Stop()
+	if p.Stop(err, nil) {
 		return
 	}
-	fmt.Println(p.id, "sent handshake")
 
 	// recieve handshake
 	length, protocol, infoHash, _, err := p.wire.ReadHandshake()
-	if !p.closed &&
-		(err != nil ||
-			length != 19 ||
-			protocol != "BitTorrent protocol" ||
-			!bytes.Equal(infoHash, p.torrent.InfoHash)) {
-		fmt.Println(err)
-		p.Stop()
+	if p.Stop(err, nil) {
 		return
 	}
-	fmt.Println(p.id, "recieved handshake")
+	if !p.closed &&
+		(length != 19 ||
+			protocol != "BitTorrent protocol" ||
+			!bytes.Equal(infoHash, p.torrent.InfoHash)) {
+		p.Stop(fmt.Errorf("Malformed handshake"), nil)
+		return
+	}
 
 	// keep-alive thread
 	go func() {
@@ -153,18 +153,14 @@ func (p *peer) Start() {
 	// send bitfield
 	bitfield := p.pieceMgr.GetBitField()
 	err3 := p.wire.SendBitField(bitfield)
-	if !p.closed && err3 != nil {
-		p.Stop()
+	if p.Stop(err3, nil) {
 		return
 	}
-	fmt.Println(p.id, "sent bitfield")
 
 	// handle all subsequent messages
 	for {
 		length, messageID, payload, err := p.wire.ReadMessage()
-		if !p.closed && err != nil {
-			fmt.Println("error", err)
-			p.Stop()
+		if p.Stop(err, nil) {
 			return
 		}
 		if length == 0 {
@@ -178,7 +174,6 @@ func (p *peer) Start() {
 func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
 	case wire.CHOKE:
-		fmt.Println(p.id, "CHOKE")
 		if !p.state.peerChoking {
 			p.state.peerChoking = true
 			go func() {
@@ -186,7 +181,6 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 		}
 	case wire.UNCHOKE:
-		fmt.Println(p.id, "UNCHOKE")
 		if p.state.peerChoking {
 			p.state.peerChoking = false
 			go func() {
@@ -194,13 +188,10 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 		}
 	case wire.INTERESTED:
-		fmt.Println(p.id, "INTERESTED")
 		p.state.peerInterested = true
 	case wire.NOT_INTERESTED:
-		fmt.Println(p.id, "NOT_INTERESTED")
 		p.state.peerInterested = false
 	case wire.HAVE:
-		fmt.Println(p.id, "HAVE")
 		var pieceIndex int
 		binary.Read(payload, binary.BigEndian, &pieceIndex)
 		go func() {
@@ -213,21 +204,17 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			if !p.state.clientInterested {
 				p.state.clientInterested = true
 				err := p.wire.SendInterested()
-				fmt.Println(p.id, "client interested")
-				if !p.closed && err != nil {
-					fmt.Println("error")
-					p.Stop()
+				if p.Stop(err, nil) {
 					return
 				}
 			}
 		}
 	case wire.BITFIELD:
-		fmt.Println(p.id, "BITFIELD")
 		peerBitfield := payload.Bytes()
 		bitfield := bitmap.New(p.torrent.NumPieces)
 		p.peerBitfield = &bitfield
 		for pieceIndex := 0; pieceIndex < p.torrent.NumPieces; pieceIndex++ {
-			havePiece := bitmap.Get(peerBitfield, pieceIndex)
+			havePiece := bitmap.Get(peerBitfield, len(peerBitfield)*8-1-pieceIndex)
 			if havePiece {
 				p.peerBitfield.Set(pieceIndex, true)
 				p.pieceMgr.PieceHave(p.id, pieceIndex)
@@ -241,10 +228,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				if !bitmap.Get(clientBitField, pieceIndex) {
 					p.state.clientInterested = true
 					err := p.wire.SendInterested()
-					fmt.Println(p.id, "client interested")
-					if !p.closed && err != nil {
-						fmt.Println("error")
-						p.Stop()
+					if p.Stop(err, nil) {
 						return
 					}
 					break
@@ -252,7 +236,6 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		}
 	case wire.REQUEST:
-		fmt.Println(p.id, "REQUEST")
 		if !p.state.clientChoking && p.state.peerInterested {
 			var pieceIndex int
 			binary.Read(payload, binary.BigEndian, &pieceIndex)
@@ -270,13 +253,11 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				case <-time.After(time.Duration(BLOCK_READ_REQUEST_DELAY) * time.Second):
 					delete(p.readRequestCancelChan, requestID)
 					block, err := p.storage.BlockReadRequest(pieceIndex, blockByteOffset, length)
-					if !p.closed && err != nil {
-						p.Stop()
+					if p.Stop(err, nil) {
 						return
 					}
 					err = p.wire.SendBlock(pieceIndex, blockByteOffset, block)
-					if !p.closed && err != nil {
-						p.Stop()
+					if p.Stop(err, nil) {
 						return
 					}
 					p.stats.UpdatePeer(p.id, 0, length)
@@ -284,9 +265,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 			p.readRequestCancelChan[requestID] = quit
 		} else {
-			log.Println("peer sent request when client was choking or peer wasn't interested")
-			if !p.closed {
-				p.Stop()
+			if p.Stop(fmt.Errorf("peer sent cancel when client was choking or peer wasn't interested"), nil) {
 				return
 			}
 		}
@@ -302,28 +281,16 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			blockLength := len(blockData)
 
 			blockIndex := blockByteOffset / piece.BLOCK_SIZE
-			fmt.Println(p.id, "BLOCK", pieceIndex, blockIndex)
 			go func() {
-				downloadedPiece, piece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
-				if !p.closed && err != nil {
-					p.Stop()
+				downloadedPiece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
+				if p.Stop(err, func() {
+					if downloadedPiece && peers != nil {
+						p.peerMgr.BanPeers(peers)
+					}
+				}) {
 					return
 				}
 				if downloadedPiece {
-					expectedChecksum := []byte(p.torrent.MetaInfo.Info.Pieces[20*pieceIndex : 20*(pieceIndex+1)])
-					actualChecksum := sha1.Sum(piece)
-					if !bytes.Equal(expectedChecksum[:], actualChecksum[:]) {
-						p.peerMgr.BanPeers(peers)
-						if !p.closed {
-							p.Stop()
-							return
-						}
-					}
-					err = p.storage.WritePieceRequest(pieceIndex, piece)
-					if !p.closed && err != nil {
-						p.Stop()
-						return
-					}
 					p.peerMgr.BroadcastHave(pieceIndex)
 				}
 				p.stats.UpdatePeer(p.id, blockLength, 0)
@@ -332,7 +299,6 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			p.lastPiece = time.Now().Unix()
 		}
 	case wire.CANCEL:
-		fmt.Println(p.id, "CANCEL")
 		if !p.state.clientChoking && p.state.peerInterested {
 			var pieceIndex int
 			binary.Read(payload, binary.BigEndian, &pieceIndex)
@@ -346,14 +312,11 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				close(quitC)
 			}
 		} else {
-			log.Println("peer sent cancel when client was choking or peer wasn't interested")
-			if !p.closed {
-				p.Stop()
+			if p.Stop(fmt.Errorf("peer sent cancel when client was choking or peer wasn't interested"), nil) {
 				return
 			}
 		}
 	case wire.PORT:
-		fmt.Println(p.id, "PORT")
 		// TODO: DHT (BEP 0005)
 	}
 }

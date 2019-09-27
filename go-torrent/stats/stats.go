@@ -106,8 +106,8 @@ func (s *stats) GetPeerStats() map[string]*PeerStat {
 		peerStat.DownloadRate /= PONDERATION_TIME
 		peerStat.i = (peerStat.i + 1) % PONDERATION_TIME
 
-		clientCurrentUpload += peerStat.currentUpload
-		clientCurrentDownload += peerStat.currentDownload
+		clientCurrentDownload += peerStat.currentUpload
+		clientCurrentUpload += peerStat.currentDownload
 		peerStat.currentUpload = 0
 		peerStat.currentDownload = 0
 	}

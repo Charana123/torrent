@@ -1,7 +1,6 @@
 package peer
 
 import (
-	"fmt"
 	"math/rand"
 	"sort"
 	"time"
@@ -62,7 +61,6 @@ func sortBySpeed(peers []*PeerInfo) {
 
 func (c *choke) choke() {
 	peers := c.peerMgr.GetPeerList()
-	fmt.Println("peers", peers)
 	peerStats := c.stats.GetPeerStats()
 
 	// Partition interested and uninterested peers
@@ -87,8 +85,6 @@ func (c *choke) choke() {
 			notInterested = append(notInterested, peer)
 		}
 	}
-	fmt.Println("interested", interested)
-	fmt.Println("notInterested", notInterested)
 
 	// Sort in descending order of peer upload speed
 	sortBySpeed(interested)
