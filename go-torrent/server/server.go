@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"log"
 	"net"
 
@@ -37,6 +38,7 @@ func NewServer(
 		return nil, err
 	}
 	sv.port = sv.listener.Addr().(*net.TCPAddr).Port
+	fmt.Println("sv.port", sv.port)
 	return sv, nil
 }
 

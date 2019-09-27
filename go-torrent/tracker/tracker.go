@@ -3,7 +3,6 @@ package tracker
 import (
 	"fmt"
 	"math/rand"
-	"net"
 	"time"
 
 	"github.com/Charana123/torrent/go-torrent/peer"
@@ -29,7 +28,6 @@ type tracker struct {
 	stats        stats.Stats
 	quit         chan int
 	serverPort   int
-	clientIP     net.IP
 	key          int32
 	numwant      int32
 	announceResp struct {
@@ -48,16 +46,16 @@ func genKey() int32 {
 
 func NewTracker(
 	torrent *torrent.Torrent,
+	stats stats.Stats,
+	peerMgr peer.PeerManager,
 	quit chan int,
-	serverPort int,
-	clientIP net.IP,
-	stats stats.Stats) Tracker {
+	serverPort int) Tracker {
 
 	tr := &tracker{
 		torrent:    torrent,
 		quit:       quit,
 		serverPort: serverPort,
-		clientIP:   clientIP,
+		peerMgr:    peerMgr,
 		key:        genKey(),
 		numwant:    50,
 		stats:      stats,
@@ -66,6 +64,7 @@ func NewTracker(
 }
 
 func (tr *tracker) announceTracker(trackerURL string) error {
+	fmt.Println("announceTracker", trackerURL)
 
 	var queryTracker func(string, int) error
 	if trackerURL[:6] == "udp://" {
@@ -77,12 +76,14 @@ func (tr *tracker) announceTracker(trackerURL string) error {
 	}
 
 	for {
+		fmt.Println("tr.announceResp.Interval", tr.announceResp.Interval)
 		select {
 		case <-tr.quit:
 			queryTracker(trackerURL, STOPPED)
 			return nil
 		case <-time.After(time.Second * time.Duration(tr.announceResp.Interval)):
 			err := queryTracker(trackerURL, NONE)
+			fmt.Println(err)
 			if err != nil {
 				return err
 			}
@@ -96,12 +97,13 @@ func (tr *tracker) Start() {
 			for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
 				for i, trackerURL := range trackerURLs {
 					err := tr.announceTracker(trackerURL)
+					// fmt.Println("error", err)
 					// tracker must stop
 					if err == nil {
 						return
 					}
 					// Otherwise, lower tracker priority for its tier
-					trackerURLs = append(append(trackerURLs[:i-1], trackerURLs[i:]...), trackerURL)
+					trackerURLs = append(append(trackerURLs[i:], trackerURLs[:i]...), trackerURL)
 				}
 			}
 		} else {

@@ -5,7 +5,6 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
-	"net"
 	"os"
 	"strings"
 	"sync"
@@ -27,8 +26,6 @@ type randomAccessStorage struct {
 
 func NewRandomAccessStorage(
 	torrent *torrent.Torrent) Storage {
-	var b map[int]int
-	b[0] = 1
 	return &randomAccessStorage{
 		torrent: torrent,
 	}
@@ -57,7 +54,7 @@ func (d *randomAccessStorage) Init() {
 
 		// Create sub-directories and create/open file handlers
 		offset := 0
-		for fileIndex, file := range d.torrent.MetaInfo.Info.Files {
+		for _, file := range d.torrent.MetaInfo.Info.Files {
 			subdir := strings.Join(append([]string{d.torrent.MetaInfo.Info.Name}, file.Path[:len(file.Path)-1]...), "/")
 			if _, err := appFS.Stat(subdir); os.IsNotExist(err) {
 				err := appFS.MkdirAll(subdir, 0755)
@@ -66,7 +63,7 @@ func (d *randomAccessStorage) Init() {
 			path := strings.Join(append([]string{d.torrent.MetaInfo.Info.Name}, file.Path...), "/")
 			d.files = append(d.files, openOrCreateFile(path, file.Length))
 			d.fileLocks = append(d.fileLocks, &sync.Mutex{})
-			d.fileOffsets[fileIndex] = offset
+			d.fileOffsets = append(d.fileOffsets, offset)
 			offset += file.Length
 		}
 
@@ -75,7 +72,12 @@ func (d *randomAccessStorage) Init() {
 		file := openOrCreateFile(d.torrent.MetaInfo.Info.Name, d.torrent.MetaInfo.Info.Length)
 		d.files = append(d.files, file)
 		d.fileLocks = append(d.fileLocks, &sync.Mutex{})
-		d.fileOffsets[0] = 0
+		d.fileOffsets = append(d.fileOffsets, 0)
+
+		d.torrent.MetaInfo.Info.Files = append(d.torrent.MetaInfo.Info.Files, torrent.File{
+			Length: d.torrent.MetaInfo.Info.Length,
+			Path:   []string{d.torrent.MetaInfo.Info.Name},
+		})
 	}
 }
 
@@ -87,6 +89,8 @@ func (d *randomAccessStorage) find(globalOffset int) (int, int, error) {
 		if globalOffset >= d.fileOffsets[fileIndex] &&
 			globalOffset < d.fileOffsets[fileIndex]+d.torrent.MetaInfo.Info.Files[fileIndex].Length {
 			fileOffset := globalOffset - d.fileOffsets[fileIndex]
+			fmt.Println("fileIndex", fileIndex)
+			fmt.Println("fileOffset", fileOffset)
 			return fileIndex, fileOffset, nil
 		}
 		if globalOffset >= d.fileOffsets[fileIndex] {
@@ -94,12 +98,7 @@ func (d *randomAccessStorage) find(globalOffset int) (int, int, error) {
 		} else {
 			j = fileIndex
 		}
-		var i interface{}
-		i = net.TCPConn{}
-		j := i.(net.TCPConn)
-		fmt.Println(j)
 	}
-
 	return 0, 0, fmt.Errorf("File doesn't exist")
 }
 

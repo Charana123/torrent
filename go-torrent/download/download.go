@@ -1,20 +1,19 @@
-package client
+package download
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 
 	"github.com/Charana123/torrent/go-torrent/piece"
+	"github.com/Charana123/torrent/go-torrent/server"
 	"github.com/Charana123/torrent/go-torrent/stats"
-
 	"github.com/Charana123/torrent/go-torrent/storage"
+	"github.com/Charana123/torrent/go-torrent/tracker"
 
 	"github.com/Charana123/torrent/go-torrent/peer"
-	"github.com/Charana123/torrent/go-torrent/server"
 	"github.com/Charana123/torrent/go-torrent/torrent"
-	"github.com/Charana123/torrent/go-torrent/tracker"
 )
 
 type Download interface {
@@ -58,22 +57,22 @@ func (d *download) Start(path string) error {
 	quit := make(chan int)
 	d.quit = quit
 
+	fmt.Println(t)
+
 	storage := storage.NewRandomAccessStorage(t)
-	go storage.Init()
+	storage.Init()
 	clientBitfield, _, left := storage.GetCurrentDownloadState()
 	stats := stats.NewStats(0, 0, left)
 	pieceMgr := piece.NewRarestFirstPieceManager(t, clientBitfield)
 	d.peerMgr = peer.NewPeerManager(t, pieceMgr, storage, stats)
+	choke := peer.NewChoke(d.peerMgr, stats, quit)
+	go choke.Start()
 	sv, err := server.NewServer(d.peerMgr, quit)
+	if err != nil {
+		return err
+	}
 	go sv.Serve()
-	if err != nil {
-		return err
-	}
-	clientIP, err := getExternalIP()
-	if err != nil {
-		return err
-	}
-	tracker := tracker.NewTracker(t, quit, sv.GetServerPort(), net.ParseIP(clientIP), stats)
+	tracker := tracker.NewTracker(t, stats, d.peerMgr, quit, sv.GetServerPort())
 	go tracker.Start()
 	return nil
 }

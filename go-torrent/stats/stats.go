@@ -58,6 +58,8 @@ func NewStats(
 			TotalDownload: downloaded,
 			Left:          left,
 		},
+		clientStats: &ClientStats{},
+		peerStats:   make(map[string]*PeerStat),
 	}
 }
 
@@ -71,7 +73,8 @@ func (s *stats) UpdatePeer(id string, uploaded int, downloaded int) {
 
 	peerStat, ok := s.peerStats[id]
 	if !ok {
-		s.peerStats[id] = &PeerStat{}
+		peerStat = &PeerStat{}
+		s.peerStats[id] = peerStat
 	}
 	peerStat.currentUpload += uploaded
 	peerStat.currentDownload += downloaded
@@ -84,7 +87,7 @@ func (s *stats) RemovePeer(id string) {
 	delete(s.peerStats, id)
 }
 
-func sumReduce(acc int, x int) int {
+func sumReduce(acc int, x, _ int) int {
 	return acc + x
 }
 

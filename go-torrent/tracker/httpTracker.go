@@ -26,9 +26,9 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	urlEncodedPeerID := url.QueryEscape(string(torrent.PEER_ID))
 	q.Set("peer_id", urlEncodedPeerID)
 	uploaded, downloaded, left := tr.stats.GetTrackerStats()
-	q.Set("uploaded", strconv.Itoa(uploaded))
-	q.Set("downloaded", strconv.Itoa(downloaded))
-	q.Set("left", strconv.Itoa(left))
+	q.Set("uploaded", strconv.Itoa(int(uploaded)))
+	q.Set("downloaded", strconv.Itoa(int(downloaded)))
+	q.Set("left", strconv.Itoa(int(left)))
 	q.Set("key", strconv.Itoa(int(tr.key)))
 	switch event {
 	case COMPLETED:
@@ -37,9 +37,6 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 		q.Set("key", "started")
 	case STOPPED:
 		q.Set("key", "stopped")
-	}
-	if tr.clientIP != nil {
-		q.Set("ip", tr.clientIP.String())
 	}
 	q.Set("numwant", strconv.Itoa(int(tr.numwant)))
 	q.Set("port", strconv.Itoa(int(tr.serverPort)))

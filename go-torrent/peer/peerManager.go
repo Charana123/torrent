@@ -1,6 +1,7 @@
 package peer
 
 import (
+	"fmt"
 	"net"
 	"sync"
 	"time"
@@ -38,7 +39,6 @@ type peerManager struct {
 	numPeers    int
 	maxPeers    int
 	bannedPeers mapset.Set
-	quit        chan int
 }
 
 func NewPeerManager(
@@ -48,10 +48,13 @@ func NewPeerManager(
 	stats stats.Stats) PeerManager {
 
 	return &peerManager{
-		torrent:  torrent,
-		pieceMgr: pieceMgr,
-		storage:  storage,
-		stats:    stats,
+		torrent:     torrent,
+		pieceMgr:    pieceMgr,
+		storage:     storage,
+		stats:       stats,
+		peers:       make(map[string]Peer),
+		bannedPeers: mapset.NewSet(),
+		maxPeers:    100,
 	}
 }
 
@@ -66,6 +69,7 @@ func (pm *peerManager) BroadcastHave(pieceIndex int) {
 	pm.RLock()
 	defer pm.RUnlock()
 
+	fmt.Println("Broadcast Have", pieceIndex)
 	for _, peer := range pm.peers {
 		peer.GetWire().SendHave(pieceIndex)
 	}
@@ -111,7 +115,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 	}
 
 	w := (wire.Wire)(nil)
-	if conn == nil {
+	if conn != nil {
 		w = wire.NewWire(conn.(*net.TCPConn), time.Duration(time.Second*PEER_TIMEOUT))
 	}
 	peer := NewPeer(
@@ -121,6 +125,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 		pm.storage,
 		pm,
 		pm.pieceMgr,
+		pm.stats,
 	)
 	pm.peers[id] = peer
 	pm.numPeers++

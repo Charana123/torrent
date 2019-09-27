@@ -62,19 +62,24 @@ func sortBySpeed(peers []*PeerInfo) {
 
 func (c *choke) choke() {
 	peers := c.peerMgr.GetPeerList()
+	fmt.Println("peers", peers)
 	peerStats := c.stats.GetPeerStats()
 
 	// Partition interested and uninterested peers
 	interested := make([]*PeerInfo, 0)
 	notInterested := make([]*PeerInfo, 0)
 	for _, peer := range peers {
-		if c.seeding {
-			peer.speed = peerStats[peer.ID].UploadRate
-		} else {
-			peer.speed = peerStats[peer.ID].DownloadRate
+		if peerStat, ok := peerStats[peer.ID]; ok {
+			if c.seeding {
+				peer.speed = peerStat.UploadRate
+			} else {
+				peer.speed = peerStat.DownloadRate
+			}
 		}
-		if time.Now().Unix()-peer.LastPiece > SNUBBED_PERIOD {
-			peer.snubbedClient = true
+		if peer.State.clientInterested && !peer.State.peerChoking {
+			if time.Now().Unix()-peer.LastPiece > SNUBBED_PERIOD {
+				peer.snubbedClient = true
+			}
 		}
 		if peer.State.peerInterested && !peer.snubbedClient {
 			interested = append(interested, peer)
@@ -82,6 +87,8 @@ func (c *choke) choke() {
 			notInterested = append(notInterested, peer)
 		}
 	}
+	fmt.Println("interested", interested)
+	fmt.Println("notInterested", notInterested)
 
 	// Sort in descending order of peer upload speed
 	sortBySpeed(interested)
@@ -91,7 +98,6 @@ func (c *choke) choke() {
 	// (keep the client unchoked) i.e. choose the client as one their 4 active downloaders
 	speedThreshold := 0
 	for i := 0; i < len(interested) && i < DOWNLOADERS-1; i++ {
-		fmt.Println("interested peer id: ", interested[i].ID)
 		interested[i].shouldUnchoke = true
 		speedThreshold = interested[i].speed
 	}
@@ -102,7 +108,7 @@ func (c *choke) choke() {
 		notInterested[i].shouldUnchoke = true
 	}
 
-	// optimistically unchoke a single interested peer - charity upload for peerly
+	// optimistically unchoke a single interested peer - charity upload for peers
 	// newly connecting to the swarm
 	if len(interested) > DOWNLOADERS-1 {
 		interested = interested[DOWNLOADERS-1:]

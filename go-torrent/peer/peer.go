@@ -5,6 +5,7 @@ import (
 	"crypto/sha1"
 	"encoding/binary"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
 	"strconv"
@@ -60,7 +61,8 @@ func NewPeer(
 	torrent *torrent.Torrent,
 	storage storage.Storage,
 	peerMgr PeerManager,
-	pieceMgr piece.PieceManager) *peer {
+	pieceMgr piece.PieceManager,
+	stats stats.Stats) *peer {
 
 	peer := &peer{
 		id:                    id,
@@ -69,7 +71,14 @@ func NewPeer(
 		storage:               storage,
 		peerMgr:               peerMgr,
 		pieceMgr:              pieceMgr,
+		stats:                 stats,
 		readRequestCancelChan: make(map[string]chan int),
+		state: connState{
+			peerChoking:      true,
+			clientChoking:    true,
+			peerInterested:   false,
+			clientInterested: false,
+		},
 	}
 	return peer
 }
@@ -84,7 +93,10 @@ func (p *peer) Stop() {
 		p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
 	}()
 	p.closed = true
-	p.wire.Close()
+	if p.wire != nil {
+		fmt.Println("client stopped")
+		p.wire.Close()
+	}
 }
 
 func (p *peer) GetPeerInfo() (string, connState, wire.Wire, int64) {
@@ -93,35 +105,35 @@ func (p *peer) GetPeerInfo() (string, connState, wire.Wire, int64) {
 
 func (p *peer) Start() {
 	if p.wire == nil {
-		conn, err := net.Dial("tcp4", p.id)
+		conn, err := net.DialTimeout("tcp4", p.id, time.Duration(2*time.Second))
 		if !p.closed && err != nil {
 			p.Stop()
 			return
 		}
 		p.wire = newWire(conn.(*net.TCPConn), time.Duration(time.Second*2))
 	}
+	fmt.Println(p.id, "connected")
 
 	// send handshake
-	err1 := p.wire.SendHandshake(19, "BitTorrent protocol", p.torrent.InfoHash, torrent.PEER_ID)
-	if !p.closed && err1 != nil {
+	err := p.wire.SendHandshake(19, "BitTorrent protocol", p.torrent.InfoHash, torrent.PEER_ID)
+	if !p.closed && err != nil {
 		p.Stop()
-		fmt.Println("one")
 		return
 	}
+	fmt.Println(p.id, "sent handshake")
 
 	// recieve handshake
-	length, protocol, infoHash, _, err2 := p.wire.ReadHandshake()
+	length, protocol, infoHash, _, err := p.wire.ReadHandshake()
 	if !p.closed &&
-		(length != 19 ||
+		(err != nil ||
+			length != 19 ||
 			protocol != "BitTorrent protocol" ||
 			!bytes.Equal(infoHash, p.torrent.InfoHash)) {
+		fmt.Println(err)
 		p.Stop()
 		return
 	}
-	if !p.closed && err2 != nil {
-		p.Stop()
-		return
-	}
+	fmt.Println(p.id, "recieved handshake")
 
 	// keep-alive thread
 	go func() {
@@ -145,11 +157,13 @@ func (p *peer) Start() {
 		p.Stop()
 		return
 	}
+	fmt.Println(p.id, "sent bitfield")
 
 	// handle all subsequent messages
 	for {
 		length, messageID, payload, err := p.wire.ReadMessage()
 		if !p.closed && err != nil {
+			fmt.Println("error", err)
 			p.Stop()
 			return
 		}
@@ -164,6 +178,7 @@ func (p *peer) Start() {
 func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
 	case wire.CHOKE:
+		fmt.Println(p.id, "CHOKE")
 		if !p.state.peerChoking {
 			p.state.peerChoking = true
 			go func() {
@@ -171,6 +186,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 		}
 	case wire.UNCHOKE:
+		fmt.Println(p.id, "UNCHOKE")
 		if p.state.peerChoking {
 			p.state.peerChoking = false
 			go func() {
@@ -178,10 +194,13 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 		}
 	case wire.INTERESTED:
+		fmt.Println(p.id, "INTERESTED")
 		p.state.peerInterested = true
 	case wire.NOT_INTERESTED:
+		fmt.Println(p.id, "NOT_INTERESTED")
 		p.state.peerInterested = false
 	case wire.HAVE:
+		fmt.Println(p.id, "HAVE")
 		var pieceIndex int
 		binary.Read(payload, binary.BigEndian, &pieceIndex)
 		go func() {
@@ -190,18 +209,20 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 		p.peerBitfield.Set(pieceIndex, true)
 
 		// If client doesn't have piece, become interested
-		if bitmap.Get(p.pieceMgr.GetBitField(), pieceIndex) {
+		if !bitmap.Get(p.pieceMgr.GetBitField(), pieceIndex) {
 			if !p.state.clientInterested {
 				p.state.clientInterested = true
 				err := p.wire.SendInterested()
+				fmt.Println(p.id, "client interested")
 				if !p.closed && err != nil {
+					fmt.Println("error")
 					p.Stop()
 					return
 				}
 			}
 		}
 	case wire.BITFIELD:
-
+		fmt.Println(p.id, "BITFIELD")
 		peerBitfield := payload.Bytes()
 		bitfield := bitmap.New(p.torrent.NumPieces)
 		p.peerBitfield = &bitfield
@@ -215,15 +236,23 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 
 		// If client doesn't have piece in peer bitfield, become interested
 		clientBitField := p.pieceMgr.GetBitField()
-		for pieceIndex := 0; pieceIndex < p.peerBitfield.Len(); pieceIndex++ {
+		for pieceIndex := 0; pieceIndex < p.torrent.NumPieces; pieceIndex++ {
 			if p.peerBitfield.Get(pieceIndex) {
 				if !bitmap.Get(clientBitField, pieceIndex) {
 					p.state.clientInterested = true
+					err := p.wire.SendInterested()
+					fmt.Println(p.id, "client interested")
+					if !p.closed && err != nil {
+						fmt.Println("error")
+						p.Stop()
+						return
+					}
 					break
 				}
 			}
 		}
 	case wire.REQUEST:
+		fmt.Println(p.id, "REQUEST")
 		if !p.state.clientChoking && p.state.peerInterested {
 			var pieceIndex int
 			binary.Read(payload, binary.BigEndian, &pieceIndex)
@@ -262,37 +291,48 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		}
 	case wire.BLOCK:
-		var pieceIndex int
-		binary.Read(payload, binary.BigEndian, pieceIndex)
-		var blockByteOffset int
-		binary.Read(payload, binary.BigEndian, blockByteOffset)
-		var blockData []byte
-		binary.Read(payload, binary.BigEndian, blockData)
-		blockLength := len(blockData)
+		if !p.state.peerChoking && p.state.clientInterested {
+			var pi int32
+			binary.Read(payload, binary.BigEndian, &pi)
+			pieceIndex := int(pi)
+			var bbo int32
+			binary.Read(payload, binary.BigEndian, &bbo)
+			blockByteOffset := int(bbo)
+			blockData, _ := ioutil.ReadAll(payload)
+			blockLength := len(blockData)
 
-		blockIndex := blockByteOffset / piece.BLOCK_SIZE
-		go func() {
-			downloadedPiece, piece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
-			if !p.closed && err != nil {
-				p.Stop()
-				return
-			}
-			if downloadedPiece {
-				expectedChecksum := []byte(p.torrent.MetaInfo.Info.Pieces[20*pieceIndex : 20*(pieceIndex+1)])
-				actualChecksum := sha1.Sum(piece)
-				if !bytes.Equal(expectedChecksum[:], actualChecksum[:]) {
-					p.peerMgr.BanPeers(peers)
+			blockIndex := blockByteOffset / piece.BLOCK_SIZE
+			fmt.Println(p.id, "BLOCK", pieceIndex, blockIndex)
+			go func() {
+				downloadedPiece, piece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
+				if !p.closed && err != nil {
 					p.Stop()
 					return
 				}
-				p.storage.WritePieceRequest(pieceIndex, piece)
-				p.peerMgr.BroadcastHave(pieceIndex)
-			}
-			p.stats.UpdatePeer(p.id, blockLength, 0)
-			p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
-		}()
-		p.lastPiece = time.Now().Unix()
+				if downloadedPiece {
+					expectedChecksum := []byte(p.torrent.MetaInfo.Info.Pieces[20*pieceIndex : 20*(pieceIndex+1)])
+					actualChecksum := sha1.Sum(piece)
+					if !bytes.Equal(expectedChecksum[:], actualChecksum[:]) {
+						p.peerMgr.BanPeers(peers)
+						if !p.closed {
+							p.Stop()
+							return
+						}
+					}
+					err = p.storage.WritePieceRequest(pieceIndex, piece)
+					if !p.closed && err != nil {
+						p.Stop()
+						return
+					}
+					p.peerMgr.BroadcastHave(pieceIndex)
+				}
+				p.stats.UpdatePeer(p.id, blockLength, 0)
+				p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
+			}()
+			p.lastPiece = time.Now().Unix()
+		}
 	case wire.CANCEL:
+		fmt.Println(p.id, "CANCEL")
 		if !p.state.clientChoking && p.state.peerInterested {
 			var pieceIndex int
 			binary.Read(payload, binary.BigEndian, &pieceIndex)
@@ -313,6 +353,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		}
 	case wire.PORT:
+		fmt.Println(p.id, "PORT")
 		// TODO: DHT (BEP 0005)
 	}
 }

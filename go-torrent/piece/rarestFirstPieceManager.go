@@ -87,9 +87,11 @@ func (pm *rarestFirst) PeerStopped(id string, peerBitfield *bitmap.Bitmap) {
 	defer pm.Unlock()
 
 	// Update piece availabilities
-	for pieceIndex := 0; pieceIndex < peerBitfield.Len(); pieceIndex++ {
-		if peerBitfield.Get(pieceIndex) {
-			pm.pieceInfo[pieceIndex].availabilty--
+	if peerBitfield != nil {
+		for pieceIndex := 0; pieceIndex < peerBitfield.Len(); pieceIndex++ {
+			if peerBitfield.Get(pieceIndex) {
+				pm.pieceInfo[pieceIndex].availabilty--
+			}
 		}
 	}
 
@@ -129,7 +131,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	pm.pieceInfo[pieceIndex].peers.Add(id)
 
 	// If all blocks for piece are downloaded, set piece as downloaded
-	for i := len(pm.pieceInfo[pieceIndex].blocks) - 1; i >= 0; i-- {
+	for i := 0; i < len(pm.pieceInfo[pieceIndex].blocks); i++ {
 		block := pm.pieceInfo[pieceIndex].blocks[i]
 		if !block.downloaded {
 			return false, ([]byte)(nil), (mapset.Set)(nil), nil
@@ -147,7 +149,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	for _, block := range pm.pieceInfo[pieceIndex].blocks {
 		binary.Write(piece, binary.BigEndian, block.data)
 	}
-	return false, piece.Bytes(), pm.pieceInfo[pieceIndex].peers, nil
+	return true, piece.Bytes(), pm.pieceInfo[pieceIndex].peers, nil
 }
 
 func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) error {
@@ -163,7 +165,8 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 		pieceIndex = pi
 		blocks = 1
 	} else {
-		// Find the peer's rarest piece that the client doesn't have
+		// Find the peer's rarest piece that the client doesn't have and isn't
+		// being downloaded by another peer
 		pieces := make([]int, 0)
 		for pieceIndex := 0; pieceIndex < peerBitfield.Len(); pieceIndex++ {
 			if peerBitfield.Get(pieceIndex) {
@@ -189,7 +192,8 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 
 	for blockIndex, block := range pm.pieceInfo[pieceIndex].blocks {
 		if !block.downloaded && !block.downloading {
-			err := wire.SendRequest(pieceIndex, blockIndex, BLOCK_SIZE)
+			fmt.Println("Sending Request", id, pieceIndex, blockIndex)
+			err := wire.SendRequest(pieceIndex, blockIndex*BLOCK_SIZE, BLOCK_SIZE)
 			if err != nil {
 				return err
 			}

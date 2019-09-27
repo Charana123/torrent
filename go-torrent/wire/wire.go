@@ -3,8 +3,7 @@ package wire
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
-	"io/ioutil"
+	"io"
 	"net"
 	"time"
 )
@@ -25,7 +24,7 @@ const (
 type Wire interface {
 	// Reading
 	ReadHandshake() (uint8, string, []byte, []byte, error)
-	ReadMessage() (int, byte, []byte, error)
+	ReadMessage() (int32, byte, []byte, error)
 
 	// Writing
 	SendHandshake(length uint8, protocol string, infohash []byte, peerID []byte) error
@@ -61,7 +60,8 @@ func NewWire(
 	}
 }
 
-type handshake struct {
+// 1 + 19 + 8 + 20 + 20
+type Handshake struct {
 	Len      uint8
 	Protocol [19]byte
 	Reserved [8]uint8
@@ -102,25 +102,22 @@ func (w *wire) Close() {
 }
 
 func (w *wire) ReadHandshake() (uint8, string, []byte, []byte, error) {
-	h := handshake{}
+	h := &Handshake{}
 	w.conn.SetReadDeadline(time.Now().Add(w.timeoutDuration))
-	err := binary.Read(w.conn, binary.BigEndian, h)
+	data := make([]byte, 68)
+	_, err := io.ReadFull(w.conn, data)
 	if err != nil {
 		return 0, "", nil, nil, err
 	}
+	err = binary.Read(bytes.NewBuffer(data), binary.BigEndian, h)
 	return h.Len, string(h.Protocol[:]), h.InfoHash[:], h.PeerID[:], nil
 }
 
-func (w *wire) ReadMessage() (int, byte, []byte, error) {
+func (w *wire) ReadMessage() (int32, byte, []byte, error) {
 	w.conn.SetReadDeadline(time.Now().Add(w.timeoutDuration))
-	data, err := ioutil.ReadAll(w.conn)
-	if err != nil {
-		return 0, 0, nil, err
-	}
 
-	buf := bytes.NewBuffer(data)
-	var length int
-	err1 := binary.Read(buf, binary.BigEndian, &length)
+	var length int32
+	err1 := binary.Read(w.conn, binary.BigEndian, &length)
 	if length == 0 {
 		return length, 0, nil, nil
 	}
@@ -128,16 +125,13 @@ func (w *wire) ReadMessage() (int, byte, []byte, error) {
 		return 0, 0, nil, err1
 	}
 	var ID uint8
-	err2 := binary.Read(buf, binary.BigEndian, &ID)
+	err2 := binary.Read(w.conn, binary.BigEndian, &ID)
 	if err2 != nil {
 		return 0, 0, nil, err2
 	}
 
 	payload := make([]byte, length-1)
-	n, err3 := buf.Read(payload)
-	if n != length-1 {
-		return 0, 0, nil, fmt.Errorf("Message malformed")
-	}
+	_, err3 := io.ReadFull(w.conn, payload)
 	if err3 != nil {
 		return 0, 0, nil, err3
 	}
@@ -176,6 +170,8 @@ func (w *wire) SendBlock(pieceIndex, begin int, block []byte) error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(9+len(block)))
 	binary.Write(b, binary.BigEndian, uint8(BLOCK))
+	binary.Write(b, binary.BigEndian, int32(pieceIndex))
+	binary.Write(b, binary.BigEndian, int32(begin))
 	binary.Write(b, binary.BigEndian, block)
 	return w.sendMessage(b.Bytes())
 }
@@ -188,12 +184,12 @@ func (w *wire) SendBitField(bitfield []byte) error {
 	return w.sendMessage(b.Bytes())
 }
 
-func (w *wire) SendRequest(pieceIndex, blockIndex, length int) error {
+func (w *wire) SendRequest(pieceIndex, begin, length int) error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(13))
 	binary.Write(b, binary.BigEndian, uint8(REQUEST))
 	binary.Write(b, binary.BigEndian, int32(pieceIndex))
-	binary.Write(b, binary.BigEndian, int32(blockIndex))
+	binary.Write(b, binary.BigEndian, int32(begin))
 	binary.Write(b, binary.BigEndian, int32(length))
 	return w.sendMessage(b.Bytes())
 }

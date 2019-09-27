@@ -5,32 +5,38 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"math/rand"
 	"net"
+	"strings"
 
 	"github.com/Charana123/torrent/go-torrent/torrent"
 )
 
 // BEP 0015 - UDP Tracker Protocol for BitTorrent
 func (tr *tracker) queryUDPTracker(trackerURL string, event int) error {
-	trackerURLWithoutSchema := trackerURL[6:]
-	connectionID, err := tr.connectUDP(trackerURLWithoutSchema)
+	udpAddress := trackerURL[6:]
+	udpAddress = strings.TrimSuffix(udpAddress, "/announce")
+	trackerAddr, err := net.ResolveUDPAddr("udp", udpAddress)
 	if err != nil {
 		return err
 	}
-	return tr.announceUDP(trackerURLWithoutSchema, event, *connectionID)
-}
-
-func (tr *tracker) connectUDP(trackerURLWithoutSchema string) (*int64, error) {
-	trackerAddr, err := net.ResolveUDPAddr("udp", trackerURLWithoutSchema)
-	if err != nil {
-		return nil, err
-	}
 	trackerConn, err := net.DialUDP("udp", nil, trackerAddr)
 	if err != nil {
-		return nil, err
+		return err
 	}
+
+	fmt.Println("connecting...")
+	connectionID, err := tr.connectUDP(trackerConn)
+	fmt.Println("ConnectionID", connectionID)
+	if err != nil {
+		return err
+	}
+	return tr.announceUDP(trackerConn, event, connectionID)
+}
+
+func (tr *tracker) connectUDP(trackerConn *net.UDPConn) (int64, error) {
 
 	// Connection Request
 	connectRequest := &bytes.Buffer{}
@@ -44,12 +50,12 @@ func (tr *tracker) connectUDP(trackerURLWithoutSchema string) (*int64, error) {
 	trackerConn.Write(connectRequest.Bytes())
 
 	data := make([]byte, 16)
-	n, err := trackerConn.Read(data)
+	n, err := io.ReadFull(trackerConn, data)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	if n < 16 {
-		return nil, fmt.Errorf("Malformed connection response body")
+		return 0, fmt.Errorf("Malformed connection response body")
 	}
 
 	connectResponse := bytes.NewBuffer(data)
@@ -57,29 +63,21 @@ func (tr *tracker) connectUDP(trackerURLWithoutSchema string) (*int64, error) {
 	var actionResp int32
 	binary.Read(connectResponse, binary.BigEndian, &actionResp)
 	if actionResp != 0 {
-		return nil, fmt.Errorf("action of connection response not 'connect'")
+		return 0, fmt.Errorf("action of connection response not 'connect'")
 	}
 
 	var transactionIDResp int32
 	binary.Read(connectResponse, binary.BigEndian, &transactionIDResp)
 	if transactionID != transactionIDResp {
-		return nil, fmt.Errorf("transactionID doesn't match")
+		return 0, fmt.Errorf("transactionID doesn't match")
 	}
 
 	var connectionID int64
 	binary.Read(connectResponse, binary.BigEndian, &connectionID)
-	return &connectionID, nil
+	return connectionID, nil
 }
 
-func (tr *tracker) announceUDP(trackerURLWithoutSchema string, event int, connectionID int64) error {
-	trackerAddr, err := net.ResolveUDPAddr("udp", trackerURLWithoutSchema)
-	if err != nil {
-		return err
-	}
-	trackerConn, err := net.DialUDP("udp", nil, trackerAddr)
-	if err != nil {
-		return err
-	}
+func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID int64) error {
 
 	// Connection Request
 	announceRequest := &bytes.Buffer{}
@@ -91,26 +89,24 @@ func (tr *tracker) announceUDP(trackerURLWithoutSchema string, event int, connec
 	binary.Write(announceRequest, binary.BigEndian, tr.torrent.InfoHash)
 	binary.Write(announceRequest, binary.BigEndian, torrent.PEER_ID)
 	uploaded, downloaded, left := tr.stats.GetTrackerStats()
-	binary.Write(announceRequest, binary.BigEndian, downloaded)
-	binary.Write(announceRequest, binary.BigEndian, left)
-	binary.Write(announceRequest, binary.BigEndian, uploaded)
-	binary.Write(announceRequest, binary.BigEndian, event)
-	if tr.clientIP != nil {
-		binary.Write(announceRequest, binary.BigEndian, tr.clientIP)
-	} else {
-		binary.Write(announceRequest, binary.BigEndian, int32(0)) // defualt
-	}
+	binary.Write(announceRequest, binary.BigEndian, int64(downloaded))
+	binary.Write(announceRequest, binary.BigEndian, int64(left))
+	binary.Write(announceRequest, binary.BigEndian, int64(uploaded))
+	binary.Write(announceRequest, binary.BigEndian, int32(event))
+	binary.Write(announceRequest, binary.BigEndian, int32(0)) // defualt
 	binary.Write(announceRequest, binary.BigEndian, tr.key)
-	binary.Write(announceRequest, binary.BigEndian, tr.numwant)
-	binary.Write(announceRequest, binary.BigEndian, tr.serverPort)
+	binary.Write(announceRequest, binary.BigEndian, int32(tr.numwant))
+	binary.Write(announceRequest, binary.BigEndian, uint16(tr.serverPort))
 
 	trackerConn.Write(announceRequest.Bytes())
 
-	data, err := ioutil.ReadAll(trackerConn)
+	fmt.Println("numwant", tr.numwant)
+	data := make([]byte, 20+6*tr.numwant)
+	n, err := io.ReadFull(trackerConn, data)
 	if err != nil {
 		return err
 	}
-	if len(data) < 20 {
+	if n < 20 {
 		return fmt.Errorf("Malformed announce response body")
 	}
 
@@ -137,7 +133,10 @@ func (tr *tracker) announceUDP(trackerURLWithoutSchema string, event int, connec
 	if event != STOPPED {
 		for i := 0; i < len(peerAddrs); i += 6 {
 			ip := net.IPv4(peerAddrs[i+0], peerAddrs[i+1], peerAddrs[i+2], peerAddrs[i+3])
-			tr.peerMgr.AddPeer(ip.String(), nil)
+			port := binary.BigEndian.Uint16([]byte(peerAddrs[i+4 : i+6]))
+			id := fmt.Sprintf("%s:%d", ip, port)
+			fmt.Println("id", i/6, id)
+			tr.peerMgr.AddPeer(id, nil)
 		}
 	}
 	return nil
