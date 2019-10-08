@@ -27,6 +27,7 @@ type rarestFirst struct {
 	peerToPiece         map[string]int
 	pieceInfo           []*pieceInfo
 	storage             storage.Storage
+	piecesDownloaded    int
 }
 
 type pieceInfo struct {
@@ -79,7 +80,17 @@ func NewRarestFirstPieceManager(
 	}
 	pm.pieceInfo = pis
 
+	for i := 0; i < tor.NumPieces; i++ {
+		if pm.clientBitField.Get(i) {
+			pm.piecesDownloaded++
+		}
+	}
+
 	return pm
+}
+
+func (pm *rarestFirst) GetPiecesDownloaded() int {
+	return pm.piecesDownloaded
 }
 
 func (pm *rarestFirst) GetBitField() []byte {
@@ -182,13 +193,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	pm.pieceInfo[pieceIndex].downloading = false
 	delete(pm.peerToPiece, id)
 	pm.clientBitField.Set(pieceIndex, true)
-
-	piecesToDownload := pm.tor.NumPieces
-	for i := 0; i < pm.tor.NumPieces; i++ {
-		if pm.clientBitField.Get(i) {
-			piecesToDownload--
-		}
-	}
+	pm.piecesDownloaded++
 
 	return true, pm.pieceInfo[pieceIndex].peers, nil
 }

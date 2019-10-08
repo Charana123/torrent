@@ -65,7 +65,7 @@ func (d *download) Start(path string) error {
 	stats := stats.NewStats(0, 0, left)
 	pieceMgr := piece.NewRarestFirstPieceManager(t, storage, clientBitfield)
 	d.peerMgr = peer.NewPeerManager(t, pieceMgr, storage, stats)
-	choke := peer.NewChoke(d.peerMgr, stats, quit)
+	choke := peer.NewChoke(t, d.peerMgr, pieceMgr, stats, quit)
 	go choke.Start()
 	sv, err := server.NewServer(d.peerMgr, quit)
 	if err != nil {

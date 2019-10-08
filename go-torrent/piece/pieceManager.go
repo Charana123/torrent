@@ -12,6 +12,7 @@ var (
 )
 
 type PieceManager interface {
+	GetPiecesDownloaded() (piecesDownloaded int)
 	GetBitField() (clientBitfield []byte)
 	PeerChoked(id string)
 	PeerStopped(id string, peerBitfield *bitmap.Bitmap)

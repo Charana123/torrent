@@ -23,7 +23,7 @@ const (
 type PeerManager interface {
 	AddPeer(id string, conn net.Conn)
 	RemovePeer(id string)
-	GetPeerList() []*PeerInfo
+	GetPeerList() []Peer
 	StopPeers()
 	BroadcastHave(pieceIndex int)
 	BanPeers(peers mapset.Set)
@@ -86,15 +86,13 @@ func (pm *peerManager) StopPeers() {
 	}
 }
 
-func (pm *peerManager) GetPeerList() []*PeerInfo {
+func (pm *peerManager) GetPeerList() []Peer {
 	pm.RLock()
 	defer pm.RUnlock()
 
-	peers := []*PeerInfo{}
+	peers := []Peer{}
 	for _, peer := range pm.peers {
-		pi := &PeerInfo{}
-		pi.ID, pi.State, pi.Wire, pi.LastPiece = peer.GetPeerInfo()
-		peers = append(peers, pi)
+		peers = append(peers, peer)
 	}
 	return peers
 }

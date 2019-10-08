@@ -1,12 +1,16 @@
 package peer
 
 import (
+	"fmt"
 	"math/rand"
 	"sort"
 	"time"
 
+	"github.com/Charana123/torrent/go-torrent/torrent"
+
+	"github.com/Charana123/torrent/go-torrent/piece"
+
 	"github.com/Charana123/torrent/go-torrent/stats"
-	"github.com/Charana123/torrent/go-torrent/wire"
 )
 
 const (
@@ -17,7 +21,6 @@ const (
 
 type PeerInfo struct {
 	ID    string
-	Wire  wire.Wire
 	State struct {
 		peerInterested   bool
 		clientInterested bool
@@ -35,21 +38,27 @@ type Choke interface {
 }
 
 type choke struct {
-	peerMgr PeerManager
-	stats   stats.Stats
-	seeding bool
-	quit    chan int
+	torrent  *torrent.Torrent
+	peerMgr  PeerManager
+	pieceMgr piece.PieceManager
+	stats    stats.Stats
+	seeding  bool
+	quit     chan int
 }
 
 func NewChoke(
+	torrent *torrent.Torrent,
 	peerMgr PeerManager,
+	pieceMgr piece.PieceManager,
 	stats stats.Stats,
 	quit chan int) Choke {
 
 	return &choke{
-		peerMgr: peerMgr,
-		stats:   stats,
-		quit:    quit,
+		torrent:  torrent,
+		peerMgr:  peerMgr,
+		pieceMgr: pieceMgr,
+		stats:    stats,
+		quit:     quit,
 	}
 }
 
@@ -61,30 +70,43 @@ func sortBySpeed(peers []*PeerInfo) {
 
 func (c *choke) choke() {
 	peers := c.peerMgr.GetPeerList()
+
+	peerInfos := []*PeerInfo{}
+	for _, peer := range peers {
+		id, state, lastPiece := peer.GetPeerInfo()
+		peerInfo := &PeerInfo{
+			ID:        id,
+			State:     state,
+			LastPiece: lastPiece,
+		}
+		peerInfos = append(peerInfos, peerInfo)
+	}
 	peerStats := c.stats.GetPeerStats()
 
 	// Partition interested and uninterested peers
 	interested := make([]*PeerInfo, 0)
 	notInterested := make([]*PeerInfo, 0)
-	for _, peer := range peers {
-		if peerStat, ok := peerStats[peer.ID]; ok {
+	for _, peerInfo := range peerInfos {
+		if peerStat, ok := peerStats[peerInfo.ID]; ok {
 			if c.seeding {
-				peer.speed = peerStat.UploadRate
+				peerInfo.speed = peerStat.UploadRate
 			} else {
-				peer.speed = peerStat.DownloadRate
+				peerInfo.speed = peerStat.DownloadRate
 			}
 		}
-		if peer.State.clientInterested && !peer.State.peerChoking {
-			if time.Now().Unix()-peer.LastPiece > SNUBBED_PERIOD {
-				peer.snubbedClient = true
+		if peerInfo.State.clientInterested && !peerInfo.State.peerChoking {
+			if time.Now().Unix()-peerInfo.LastPiece > SNUBBED_PERIOD {
+				peerInfo.snubbedClient = true
 			}
 		}
-		if peer.State.peerInterested && !peer.snubbedClient {
-			interested = append(interested, peer)
+		if peerInfo.State.peerInterested && !peerInfo.snubbedClient {
+			interested = append(interested, peerInfo)
 		} else {
-			notInterested = append(notInterested, peer)
+			notInterested = append(notInterested, peerInfo)
 		}
 	}
+	fmt.Println("interested", interested)
+	fmt.Println("notInterested", notInterested)
 
 	// Sort in descending order of peer upload speed
 	sortBySpeed(interested)
@@ -121,16 +143,23 @@ func (c *choke) choke() {
 	}
 
 	// apply unchoke/choke
-	for _, peer := range peers {
-		if peer.shouldUnchoke && peer.State.clientChoking {
-			peer.Wire.SendUnchoke()
+	for i, peerInfo := range peerInfos {
+		if peerInfo.shouldUnchoke && peerInfo.State.clientChoking {
+			fmt.Print(peerInfo.ID, "unchoke")
+			peers[i].SendUnchoke()
 		}
 		// keep choking and the client is currently not choking
 		// then choke
-		if !peer.shouldUnchoke && !peer.State.clientChoking {
-			peer.Wire.SendChoke()
+		if !peerInfo.shouldUnchoke && !peerInfo.State.clientChoking {
+			fmt.Print(peerInfo.ID, "choke")
+			peers[i].SendChoke()
 		}
 	}
+}
+
+func (c *choke) PrintDownloadPercentage() {
+	percentage := (float32(c.pieceMgr.GetPiecesDownloaded()) / float32(c.torrent.NumPieces)) * 100
+	fmt.Println("download percentage: ", percentage)
 }
 
 func (c *choke) Start() {
@@ -140,6 +169,7 @@ func (c *choke) Start() {
 		case <-c.quit:
 			return
 		case <-time.After(time.Duration(CHOKE_INTERVAL * time.Second)):
+			c.PrintDownloadPercentage()
 			c.choke()
 		}
 	}

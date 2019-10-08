@@ -91,7 +91,7 @@ func (tr *tracker) announceTracker(trackerURL string) error {
 func (tr *tracker) Start() {
 	for {
 		if len(tr.torrent.MetaInfo.AnnounceList) > 0 {
-			tr.torrent.MetaInfo.AnnounceList = tr.torrent.MetaInfo.AnnounceList[1:]
+			// tr.torrent.MetaInfo.AnnounceList = tr.torrent.MetaInfo.AnnounceList[1:]
 			for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
 				for i, trackerURL := range trackerURLs {
 					err := tr.announceTracker(trackerURL)

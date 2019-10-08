@@ -24,8 +24,10 @@ var (
 type Peer interface {
 	Start()
 	Stop(err error, preFunc func()) bool
-	GetPeerInfo() (id string, state connState, wire wire.Wire, lastPiece int64)
+	GetPeerInfo() (id string, state connState, lastPiece int64)
 	GetWire() wire.Wire
+	SendUnchoke()
+	SendChoke()
 }
 
 var newWire = wire.NewWire
@@ -81,6 +83,16 @@ func NewPeer(
 	return peer
 }
 
+func (p *peer) SendUnchoke() {
+	p.state.clientChoking = false
+	p.wire.SendUnchoke()
+}
+
+func (p *peer) SendChoke() {
+	p.state.clientChoking = true
+	p.wire.SendChoke()
+}
+
 func (p *peer) GetWire() wire.Wire {
 	return p.wire
 }
@@ -103,8 +115,8 @@ func (p *peer) Stop(err error, preFunc func()) bool {
 	return false
 }
 
-func (p *peer) GetPeerInfo() (string, connState, wire.Wire, int64) {
-	return p.id, p.state, p.wire, p.lastPiece
+func (p *peer) GetPeerInfo() (string, connState, int64) {
+	return p.id, p.state, p.lastPiece
 }
 
 func (p *peer) Start() {
@@ -236,6 +248,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		}
 	case wire.REQUEST:
+		fmt.Print("REQUEST")
 		if !p.state.clientChoking && p.state.peerInterested {
 			var pieceIndex int
 			binary.Read(payload, binary.BigEndian, &pieceIndex)
@@ -270,6 +283,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		}
 	case wire.BLOCK:
+		fmt.Println("BLOCK")
 		if !p.state.peerChoking && p.state.clientInterested {
 			var pi int32
 			binary.Read(payload, binary.BigEndian, &pi)
