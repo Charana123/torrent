@@ -82,7 +82,7 @@ func (pm *peerManager) StopPeers() {
 	defer pm.RUnlock()
 
 	for _, peer := range pm.peers {
-		peer.Stop(fmt.Errorf("Peer gracefully shutdown"), nil)
+		peer.Stop(fmt.Errorf("Peer gracefully shutdown"), nil, false)
 	}
 }
 
@@ -101,7 +101,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 	pm.Lock()
 	defer pm.Unlock()
 
-	fmt.Print("PEER ADDED")
+	fmt.Println("added peer", id)
 	if pm.bannedPeers.Contains(id) {
 		// Peer has been banned
 		return

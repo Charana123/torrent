@@ -97,7 +97,6 @@ func (pm *rarestFirst) GetBitField() []byte {
 	pm.RLock()
 	defer pm.RUnlock()
 
-	fmt.Println("BitField: ", pm.clientBitField)
 	return pm.clientBitField.Data(true)
 }
 

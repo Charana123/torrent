@@ -2,6 +2,7 @@ package download
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -59,6 +60,7 @@ func (d *download) Start(path string) error {
 	storage := storage.NewRandomAccessStorage(t)
 	storage.Init()
 	clientBitfield, _, left := storage.GetCurrentDownloadState()
+	fmt.Println("clientBitField: ", clientBitfield)
 	stats := stats.NewStats(0, 0, left)
 	pieceMgr := piece.NewRarestFirstPieceManager(t, storage, clientBitfield)
 	d.peerMgr = peer.NewPeerManager(t, pieceMgr, storage, stats)

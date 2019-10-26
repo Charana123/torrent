@@ -23,7 +23,7 @@ var (
 
 type Peer interface {
 	Start()
-	Stop(err error, preFunc func()) bool
+	Stop(err error, preFunc func(), restart bool) bool
 	GetPeerInfo() (id string, state connState, lastPiece int64)
 	GetWire() wire.Wire
 	SendUnchoke()
@@ -46,6 +46,7 @@ type peer struct {
 	peerBitfield          *bitmap.Bitmap
 	lastPiece             int64
 	lastMessageSent       time.Time
+	blockRecieved         bool
 }
 
 type connState struct {
@@ -97,19 +98,21 @@ func (p *peer) GetWire() wire.Wire {
 	return p.wire
 }
 
-func (p *peer) Stop(err error, preFunc func()) bool {
+func (p *peer) Stop(err error, preFunc func(), restart bool) bool {
 	if !p.closed && err != nil {
 		if preFunc != nil {
 			preFunc()
 		}
-		go func() {
-			p.peerMgr.RemovePeer(p.id)
-			p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
-		}()
+		p.closed = true
 		if p.wire != nil {
 			p.wire.Close()
 		}
-		p.closed = true
+		p.peerMgr.RemovePeer(p.id)
+		p.pieceMgr.PeerStopped(p.id, p.peerBitfield)
+		if restart {
+			fmt.Println("restarting peer")
+			p.peerMgr.AddPeer(p.id, nil)
+		}
 		return true
 	}
 	return false
@@ -122,7 +125,7 @@ func (p *peer) GetPeerInfo() (string, connState, int64) {
 func (p *peer) Start() {
 	if p.wire == nil {
 		conn, err := net.DialTimeout("tcp4", p.id, time.Duration(2*time.Second))
-		if p.Stop(err, nil) {
+		if p.Stop(err, nil, false) {
 			return
 		}
 		p.wire = newWire(conn.(*net.TCPConn), time.Duration(time.Minute*2))
@@ -130,20 +133,20 @@ func (p *peer) Start() {
 
 	// send handshake
 	err := p.wire.SendHandshake(19, "BitTorrent protocol", p.torrent.InfoHash, torrent.PEER_ID)
-	if p.Stop(err, nil) {
+	if p.Stop(err, nil, false) {
 		return
 	}
 
 	// recieve handshake
 	length, protocol, infoHash, _, err := p.wire.ReadHandshake()
-	if p.Stop(err, nil) {
+	if p.Stop(err, nil, false) {
 		return
 	}
 	if !p.closed &&
 		(length != 19 ||
 			protocol != "BitTorrent protocol" ||
 			!bytes.Equal(infoHash, p.torrent.InfoHash)) {
-		p.Stop(fmt.Errorf("Malformed handshake"), nil)
+		p.Stop(fmt.Errorf("Malformed handshake"), nil, false)
 		return
 	}
 
@@ -165,14 +168,15 @@ func (p *peer) Start() {
 	// send bitfield
 	bitfield := p.pieceMgr.GetBitField()
 	err3 := p.wire.SendBitField(bitfield)
-	if p.Stop(err3, nil) {
+	if p.Stop(err3, nil, false) {
 		return
 	}
 
 	// handle all subsequent messages
 	for {
 		length, messageID, payload, err := p.wire.ReadMessage()
-		if p.Stop(err, nil) {
+		if p.Stop(err, nil, false) {
+			fmt.Println("PEER: ", p.id, " Peer disconnecting")
 			return
 		}
 		if length == 0 {
@@ -186,12 +190,19 @@ func (p *peer) Start() {
 func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
 	case wire.CHOKE:
-		fmt.Println("CHOKE")
+		fmt.Println("peer: ", p.id, ", CHOKE")
 		if !p.state.peerChoking {
 			p.state.peerChoking = true
-			go func() {
-				p.pieceMgr.PeerChoked(p.id)
-			}()
+			p.pieceMgr.PeerChoked(p.id)
+		}
+		if p.state.clientInterested && p.blockRecieved {
+			// To maintain active connections i.e.
+			// 1) interested and unchoked - we are downloading from peer
+			// 2) uninterested and choked - we maintain an open connection waiting for a HAVE request to
+			// become interested again
+			// we must reconnect if a peer chokes us while we are interested and has
+			// will most likely fullfil a block request (as it has done so in the past)
+			p.Stop(fmt.Errorf("Restarting Peer"), func() {}, true)
 		}
 	case wire.UNCHOKE:
 		fmt.Println("UNCHOKE")
@@ -209,9 +220,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	case wire.HAVE:
 		var pieceIndex int
 		binary.Read(payload, binary.BigEndian, &pieceIndex)
-		go func() {
-			p.pieceMgr.PieceHave(p.id, pieceIndex)
-		}()
+		p.pieceMgr.PieceHave(p.id, pieceIndex)
 		p.peerBitfield.Set(pieceIndex, true)
 
 		// If client doesn't have piece, become interested
@@ -219,7 +228,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			if !p.state.clientInterested {
 				p.state.clientInterested = true
 				err := p.wire.SendInterested()
-				if p.Stop(err, nil) {
+				if p.Stop(err, nil, false) {
 					return
 				}
 			}
@@ -237,7 +246,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				p.pieceMgr.PieceHave(p.id, pieceIndex)
 			}
 		}
-		fmt.Println("PEER: ", p.id, "PEER_BITFIELD: ", p.peerBitfield)
+		fmt.Println("peer: ", p.id, " bitfield: ", p.peerBitfield)
 
 		// If client doesn't have piece in peer bitfield, become interested
 		clientBitField := p.pieceMgr.GetBitField()
@@ -246,7 +255,8 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				if !bitmap.Get(clientBitField, pieceIndex) {
 					p.state.clientInterested = true
 					err := p.wire.SendInterested()
-					if p.Stop(err, nil) {
+					fmt.Println("peer: ", p.id, ", interested: true")
+					if p.Stop(err, nil, false) {
 						return
 					}
 					break
@@ -272,11 +282,11 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				case <-time.After(time.Duration(BLOCK_READ_REQUEST_DELAY) * time.Second):
 					delete(p.readRequestCancelChan, requestID)
 					block, err := p.storage.BlockReadRequest(pieceIndex, blockByteOffset, length)
-					if p.Stop(err, nil) {
+					if p.Stop(err, nil, false) {
 						return
 					}
 					err = p.wire.SendBlock(pieceIndex, blockByteOffset, block)
-					if p.Stop(err, nil) {
+					if p.Stop(err, nil, false) {
 						return
 					}
 					p.stats.UpdatePeer(p.id, 0, length)
@@ -284,11 +294,12 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 			p.readRequestCancelChan[requestID] = quit
 		} else {
-			if p.Stop(fmt.Errorf("peer sent cancel when client was choking or peer wasn't interested"), nil) {
+			if p.Stop(fmt.Errorf("peer sent cancel when client was choking or peer wasn't interested"), nil, false) {
 				return
 			}
 		}
 	case wire.BLOCK:
+		p.blockRecieved = true
 		if !p.state.peerChoking && p.state.clientInterested {
 			var pi int32
 			binary.Read(payload, binary.BigEndian, &pi)
@@ -307,7 +318,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 					if downloadedPiece && peers != nil {
 						p.peerMgr.BanPeers(peers)
 					}
-				}) {
+				}, false) {
 					return
 				}
 				if downloadedPiece {
@@ -332,7 +343,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				close(quitC)
 			}
 		} else {
-			if p.Stop(fmt.Errorf("peer sent cancel when client was choking or peer wasn't interested"), nil) {
+			if p.Stop(fmt.Errorf("peer sent cancel when client was choking or peer wasn't interested"), nil, false) {
 				return
 			}
 		}
