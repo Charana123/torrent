@@ -23,20 +23,17 @@ type Tracker interface {
 }
 
 type tracker struct {
-	torrent      *torrent.Torrent
-	peerMgr      peer.PeerManager
-	stats        stats.Stats
-	quit         chan int
-	serverPort   int
-	key          int32
-	numwant      int32
-	announceResp struct {
-		FailureReason string `bencode:"failure reason"`
-		Interval      int32
-		Leechers      int32 `bencode:"incomplete"`
-		Seeders       int32 `bencode:"complete"`
-		Peers         string
-	}
+	torrent    *torrent.Torrent
+	peerMgr    peer.PeerManager
+	stats      stats.Stats
+	quit       chan int
+	serverPort int
+	key        int32
+	numwant    int32
+
+	interval      int32
+	totalLeechers int32 `bencode:"incomplete"`
+	totalSeeders  int32 `bencode:"complete"`
 }
 
 func genKey() int32 {
@@ -57,57 +54,47 @@ func NewTracker(
 		serverPort: serverPort,
 		peerMgr:    peerMgr,
 		key:        genKey(),
-		numwant:    50,
+		numwant:    -1,
 		stats:      stats,
 	}
 	return tr
 }
 
-func (tr *tracker) announceTracker(trackerURL string) error {
-
-	var queryTracker func(string, int) error
+func (tr *tracker) queryTracker(trackerURL string, event int) error {
+	var qt func(string, int) error
 	if trackerURL[:6] == "udp://" {
-		queryTracker = tr.queryUDPTracker
+		qt = tr.queryUDPTracker
 	} else if trackerURL[:7] == "http://" {
-		queryTracker = tr.queryHTTPTracker
+		qt = tr.queryHTTPTracker
 	} else {
 		return fmt.Errorf("Invalid schema for trackerURL")
 	}
+	err := qt(trackerURL, event)
+	return err
+}
 
-	for {
-		select {
-		case <-tr.quit:
-			queryTracker(trackerURL, STOPPED)
-			return nil
-		case <-time.After(time.Second * time.Duration(tr.announceResp.Interval)):
-			err := queryTracker(trackerURL, NONE)
-			if err != nil {
-				return err
+func (tr *tracker) queryTrackers(event int) {
+	if len(tr.torrent.MetaInfo.AnnounceList) > 0 {
+		for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
+			for _, trackerURL := range trackerURLs {
+				fmt.Println("querying tracker: ", trackerURL)
+				tr.queryTracker(trackerURL, event)
 			}
 		}
+	} else {
+		tr.queryTracker(tr.torrent.MetaInfo.Announce, event)
 	}
 }
 
 func (tr *tracker) Start() {
 	for {
-		if len(tr.torrent.MetaInfo.AnnounceList) > 0 {
-			// tr.torrent.MetaInfo.AnnounceList = tr.torrent.MetaInfo.AnnounceList[1:]
-			for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
-				for i, trackerURL := range trackerURLs {
-					fmt.Println(trackerURL)
-					err := tr.announceTracker(trackerURL)
-					// tracker must stop
-					if err == nil {
-						return
-					}
-					// Otherwise, lower tracker priority for its tier
-					trackerURLs = append(append(trackerURLs[i:], trackerURLs[:i]...), trackerURL)
-				}
-			}
-		} else {
-			tr.announceTracker(tr.torrent.MetaInfo.Announce)
-			// Wait a second before trying to re-connect to SAME tracker
-			<-time.After(time.Second)
+		select {
+		case <-tr.quit:
+			tr.queryTrackers(STOPPED)
+			return
+		case <-time.After(time.Second * time.Duration(tr.interval)):
+			tr.queryTrackers(NONE)
+			fmt.Println("interval: ", tr.interval)
 		}
 	}
 }

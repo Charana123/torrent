@@ -96,9 +96,9 @@ func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID
 	binary.Write(announceRequest, binary.BigEndian, int64(left))
 	binary.Write(announceRequest, binary.BigEndian, int64(uploaded))
 	binary.Write(announceRequest, binary.BigEndian, int32(event))
-	binary.Write(announceRequest, binary.BigEndian, int32(0)) // defualt
+	binary.Write(announceRequest, binary.BigEndian, int32(0)) // ip, defualt
 	binary.Write(announceRequest, binary.BigEndian, tr.key)
-	binary.Write(announceRequest, binary.BigEndian, int32(-1))
+	binary.Write(announceRequest, binary.BigEndian, int32(tr.numwant))
 	binary.Write(announceRequest, binary.BigEndian, uint16(tr.serverPort))
 
 	trackerConn.Write(announceRequest.Bytes())
@@ -112,7 +112,6 @@ func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID
 		return fmt.Errorf("Malformed announce response body")
 	}
 
-	// announceResponse := bytes.NewBuffer(data)
 	var actionResp int32
 	binary.Read(announceResponse, binary.BigEndian, &actionResp)
 	if actionResp != 1 {
@@ -123,9 +122,17 @@ func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID
 	if transactionID != transactionIDResp {
 		return fmt.Errorf("transactionID doesn't match")
 	}
-	binary.Read(announceResponse, binary.BigEndian, &tr.announceResp.Interval)
-	binary.Read(announceResponse, binary.BigEndian, &tr.announceResp.Leechers)
-	binary.Read(announceResponse, binary.BigEndian, &tr.announceResp.Seeders)
+	var interval int32
+	binary.Read(announceResponse, binary.BigEndian, &interval)
+	if interval < tr.interval || tr.interval == 0 {
+		tr.interval = interval
+	}
+	var leechers int32
+	binary.Read(announceResponse, binary.BigEndian, &leechers)
+	tr.totalLeechers += leechers
+	var seeders int32
+	binary.Read(announceResponse, binary.BigEndian, &seeders)
+	tr.totalSeeders += seeders
 
 	peerAddrs, err := ioutil.ReadAll(announceResponse)
 	if err != nil {
