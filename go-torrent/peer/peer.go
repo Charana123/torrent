@@ -186,6 +186,7 @@ func (p *peer) Start() {
 func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
 	case wire.CHOKE:
+		fmt.Println("CHOKE")
 		if !p.state.peerChoking {
 			p.state.peerChoking = true
 			go func() {
@@ -193,6 +194,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 		}
 	case wire.UNCHOKE:
+		fmt.Println("UNCHOKE")
 		if p.state.peerChoking {
 			p.state.peerChoking = false
 			go func() {
@@ -200,6 +202,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}()
 		}
 	case wire.INTERESTED:
+		fmt.Println("PEER_INTERESTED")
 		p.state.peerInterested = true
 	case wire.NOT_INTERESTED:
 		p.state.peerInterested = false
@@ -222,16 +225,19 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		}
 	case wire.BITFIELD:
+		fmt.Println("BITFIELD")
 		peerBitfield := payload.Bytes()
 		bitfield := bitmap.New(p.torrent.NumPieces)
 		p.peerBitfield = &bitfield
+
 		for pieceIndex := 0; pieceIndex < p.torrent.NumPieces; pieceIndex++ {
-			havePiece := bitmap.Get(peerBitfield, len(peerBitfield)*8-1-pieceIndex)
+			havePiece := bitmap.Get(peerBitfield, (pieceIndex/8)*8+7-pieceIndex%8)
 			if havePiece {
 				p.peerBitfield.Set(pieceIndex, true)
 				p.pieceMgr.PieceHave(p.id, pieceIndex)
 			}
 		}
+		fmt.Println("PEER: ", p.id, "PEER_BITFIELD: ", p.peerBitfield)
 
 		// If client doesn't have piece in peer bitfield, become interested
 		clientBitField := p.pieceMgr.GetBitField()
@@ -283,7 +289,6 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			}
 		}
 	case wire.BLOCK:
-		fmt.Println("BLOCK")
 		if !p.state.peerChoking && p.state.clientInterested {
 			var pi int32
 			binary.Read(payload, binary.BigEndian, &pi)
@@ -295,6 +300,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			blockLength := len(blockData)
 
 			blockIndex := blockByteOffset / piece.BLOCK_SIZE
+			fmt.Println("PEER:", p.id, "PIECE", pieceIndex, "BLOCK", blockIndex)
 			go func() {
 				downloadedPiece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
 				if p.Stop(err, func() {

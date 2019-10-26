@@ -27,6 +27,7 @@ func (tr *tracker) queryUDPTracker(trackerURL string, event int) error {
 	if err != nil {
 		return err
 	}
+	trackerConn.SetDeadline(time.Now().Add(time.Second * 5))
 
 	connectionID, err := tr.connectUDP(trackerConn)
 	if err != nil {
@@ -46,10 +47,13 @@ func (tr *tracker) connectUDP(trackerConn *net.UDPConn) (int64, error) {
 	transactionID := rand.Int31()
 	binary.Write(connectRequest, binary.BigEndian, transactionID)
 
-	trackerConn.Write(connectRequest.Bytes())
+	n, err := trackerConn.Write(connectRequest.Bytes())
+	if err != nil {
+		return 0, err
+	}
 
 	data := make([]byte, 16)
-	n, err := io.ReadFull(trackerConn, data)
+	n, err = io.ReadFull(trackerConn, data)
 	if err != nil {
 		return 0, err
 	}
@@ -100,7 +104,6 @@ func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID
 	trackerConn.Write(announceRequest.Bytes())
 
 	announceResponse := &bytes.Buffer{}
-	trackerConn.SetDeadline(time.Now().Add(time.Second * 2))
 	n, err := io.Copy(announceResponse, trackerConn)
 	if err, ok := err.(net.Error); !ok || !err.Timeout() {
 		return err

@@ -101,6 +101,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 	pm.Lock()
 	defer pm.Unlock()
 
+	fmt.Print("PEER ADDED")
 	if pm.bannedPeers.Contains(id) {
 		// Peer has been banned
 		return

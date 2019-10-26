@@ -8,7 +8,7 @@ import (
 
 func main() {
 	d := download.NewDownload()
-	err := d.Start("/Users/charana/Downloads/sanju.torrent")
+	err := d.Start("/Users/deepaninandasena/Desktop/Work/go/src/github.com/Charana123/torrent/malone.torrent")
 	if err != nil {
 		panic(err)
 	}

@@ -148,8 +148,6 @@ func (c *choke) choke() {
 			fmt.Print(peerInfo.ID, "unchoke")
 			peers[i].SendUnchoke()
 		}
-		// keep choking and the client is currently not choking
-		// then choke
 		if !peerInfo.shouldUnchoke && !peerInfo.State.clientChoking {
 			fmt.Print(peerInfo.ID, "choke")
 			peers[i].SendChoke()

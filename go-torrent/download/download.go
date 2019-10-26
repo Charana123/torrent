@@ -2,7 +2,6 @@ package download
 
 import (
 	"bytes"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 
@@ -56,8 +55,6 @@ func (d *download) Start(path string) error {
 
 	quit := make(chan int)
 	d.quit = quit
-
-	fmt.Println(t)
 
 	storage := storage.NewRandomAccessStorage(t)
 	storage.Init()

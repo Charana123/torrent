@@ -94,6 +94,7 @@ func (tr *tracker) Start() {
 			// tr.torrent.MetaInfo.AnnounceList = tr.torrent.MetaInfo.AnnounceList[1:]
 			for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
 				for i, trackerURL := range trackerURLs {
+					fmt.Println(trackerURL)
 					err := tr.announceTracker(trackerURL)
 					// tracker must stop
 					if err == nil {
