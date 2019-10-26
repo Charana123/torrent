@@ -86,16 +86,35 @@ func NewPeer(
 
 func (p *peer) SendUnchoke() {
 	p.state.clientChoking = false
-	p.wire.SendUnchoke()
+	err := p.wire.SendUnchoke()
+	if p.Stop(err, nil, false) {
+		return
+	}
 }
 
 func (p *peer) SendChoke() {
 	p.state.clientChoking = true
-	p.wire.SendChoke()
+	err := p.wire.SendChoke()
+	if p.Stop(err, nil, false) {
+		return
+	}
 }
 
 func (p *peer) GetWire() wire.Wire {
 	return p.wire
+}
+
+func (p *peer) BanPeerThisInterval() {
+	// This peer hasn't unchoked us after we've showed interest
+	// Stop waiting for this peer
+	go func() {
+		<-time.After(time.Second * 5)
+		if p.state.peerChoking {
+			p.peerMgr.BanPeerThisInterval(p.id)
+			fmt.Println("banning peer")
+			p.Stop(fmt.Errorf("Redundant peer"), func() {}, false)
+		}
+	}()
 }
 
 func (p *peer) Stop(err error, preFunc func(), restart bool) bool {
@@ -228,6 +247,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			if !p.state.clientInterested {
 				p.state.clientInterested = true
 				err := p.wire.SendInterested()
+				p.BanPeerThisInterval()
 				if p.Stop(err, nil, false) {
 					return
 				}
@@ -255,6 +275,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 				if !bitmap.Get(clientBitField, pieceIndex) {
 					p.state.clientInterested = true
 					err := p.wire.SendInterested()
+					p.BanPeerThisInterval()
 					fmt.Println("peer: ", p.id, ", interested: true")
 					if p.Stop(err, nil, false) {
 						return
@@ -262,6 +283,14 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 					break
 				}
 			}
+		}
+		if !p.state.clientInterested {
+			p.peerMgr.BanPeerThisInterval(p.id)
+			fmt.Println("banning peer")
+			// We aren't interested in this peer, we shouldn't waste network
+			// and compute resources on it
+			// note - makes the HAVE method redundant
+			p.Stop(fmt.Errorf("Redundant peer"), func() {}, false)
 		}
 	case wire.REQUEST:
 		fmt.Print("REQUEST")

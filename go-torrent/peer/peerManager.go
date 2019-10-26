@@ -27,18 +27,21 @@ type PeerManager interface {
 	StopPeers()
 	BroadcastHave(pieceIndex int)
 	BanPeers(peers mapset.Set)
+	BanPeerThisInterval(id string)
+	NewInterval()
 }
 
 type peerManager struct {
 	sync.RWMutex
-	torrent     *torrent.Torrent
-	pieceMgr    piece.PieceManager
-	storage     storage.Storage
-	stats       stats.Stats
-	peers       map[string]Peer
-	numPeers    int
-	maxPeers    int
-	bannedPeers mapset.Set
+	torrent                 *torrent.Torrent
+	pieceMgr                piece.PieceManager
+	storage                 storage.Storage
+	stats                   stats.Stats
+	peers                   map[string]Peer
+	numPeers                int
+	maxPeers                int
+	bannedPeers             mapset.Set
+	peersBannedThisInterval mapset.Set
 }
 
 func NewPeerManager(
@@ -48,14 +51,29 @@ func NewPeerManager(
 	stats stats.Stats) PeerManager {
 
 	return &peerManager{
-		torrent:     torrent,
-		pieceMgr:    pieceMgr,
-		storage:     storage,
-		stats:       stats,
-		peers:       make(map[string]Peer),
-		bannedPeers: mapset.NewSet(),
-		maxPeers:    100,
+		torrent:                 torrent,
+		pieceMgr:                pieceMgr,
+		storage:                 storage,
+		stats:                   stats,
+		peers:                   make(map[string]Peer),
+		bannedPeers:             mapset.NewSet(),
+		peersBannedThisInterval: mapset.NewSet(),
+		maxPeers:                100,
 	}
+}
+
+func (pm *peerManager) BanPeerThisInterval(id string) {
+	pm.Lock()
+	defer pm.Unlock()
+
+	pm.peersBannedThisInterval.Add(id)
+}
+
+func (pm *peerManager) NewInterval() {
+	pm.Lock()
+	defer pm.Unlock()
+
+	pm.peersBannedThisInterval.Clear()
 }
 
 func (pm *peerManager) BanPeers(peers mapset.Set) {
@@ -102,7 +120,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 	defer pm.Unlock()
 
 	fmt.Println("added peer", id)
-	if pm.bannedPeers.Contains(id) {
+	if pm.bannedPeers.Contains(id) || pm.peersBannedThisInterval.Contains(id) {
 		// Peer has been banned
 		return
 	}

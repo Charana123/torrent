@@ -94,6 +94,7 @@ func (tr *tracker) Start() {
 			return
 		case <-time.After(time.Second * time.Duration(tr.interval)):
 			tr.queryTrackers(NONE)
+			tr.peerMgr.NewInterval()
 			fmt.Println("interval: ", tr.interval)
 		}
 	}
