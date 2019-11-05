@@ -198,7 +198,7 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	return true, pm.pieceInfo[pieceIndex].peers, nil
 }
 
-func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) (error, bool) {
+func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield *bitmap.Bitmap) error {
 	pm.Lock()
 	defer pm.Unlock()
 
@@ -245,14 +245,14 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 				err = wire.SendRequest(pieceIndex, blockIndex*BLOCK_SIZE, BLOCK_SIZE)
 			}
 			if err != nil {
-				return nil, err
+				return err
 			}
 			pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading = true
 			blocks--
 			if blocks == 0 {
-				return nil, nil
+				return nil
 			}
 		}
 	}
-	return nil, nil
+	return nil
 }
