@@ -25,6 +25,7 @@ type Download interface {
 type download struct {
 	quit    chan int
 	peerMgr peer.PeerManager
+	tor     torrent.Torrent
 }
 
 func getExternalIP() (string, error) {
@@ -42,17 +43,14 @@ func getExternalIP() (string, error) {
 	return string(bytes.TrimSpace(buf)), nil
 }
 
-func NewDownload() Download {
-	return &download{}
+func NewDownload(tor torrent.Torrent) (Download, error) {
+	return &download{
+		tor: tor,
+	}
 }
 
 // Start/Resume downloading/uploading torrent
-func (d *download) Start(path string) error {
-
-	t, err := torrent.NewTorrent(path)
-	if err != nil {
-		return err
-	}
+func (d *download) Start() error {
 
 	quit := make(chan int)
 	d.quit = quit
