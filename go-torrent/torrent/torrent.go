@@ -4,9 +4,9 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"fmt"
+	"io"
 	"log"
 	"math/rand"
-	"strings"
 
 	bencode "github.com/jackpal/bencode-go"
 )
@@ -56,7 +56,7 @@ type File struct {
 	Path   []string
 }
 
-func NewTorrent(torrentReader *strings.Reader) (*Torrent, error) {
+func NewTorrent(torrentReader io.ReadSeeker) (*Torrent, error) {
 	torrent := &Torrent{}
 
 	metaInfo, err := bencode.Decode(torrentReader)

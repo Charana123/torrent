@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"strings"
@@ -43,24 +44,26 @@ func (d *randomAccessStorage) Init() {
 	d.Lock()
 	defer d.Unlock()
 
+	infoHashHex := hex.EncodeToString(d.torrent.InfoHash)
 	if len(d.torrent.MetaInfo.Info.Files) > 0 {
 		// Multiple File Mode
 
 		// Create root directory
-		if _, err := appFS.Stat(d.torrent.MetaInfo.Info.Name); os.IsNotExist(err) {
-			err := appFS.Mkdir(d.torrent.MetaInfo.Info.Name, 0755)
+		rootDirectory := strings.Join([]string{infoHashHex, d.torrent.MetaInfo.Info.Name}, "/")
+		if _, err := appFS.Stat(rootDirectory); os.IsNotExist(err) {
+			err := appFS.Mkdir(rootDirectory, 0755)
 			fail(err)
 		}
 
 		// Create sub-directories and create/open file handlers
 		offset := 0
 		for _, file := range d.torrent.MetaInfo.Info.Files {
-			subdir := strings.Join(append([]string{d.torrent.MetaInfo.Info.Name}, file.Path[:len(file.Path)-1]...), "/")
+			subdir := strings.Join(append([]string{rootDirectory}, file.Path[:len(file.Path)-1]...), "/")
 			if _, err := appFS.Stat(subdir); os.IsNotExist(err) {
 				err := appFS.MkdirAll(subdir, 0755)
 				fail(err)
 			}
-			path := strings.Join(append([]string{d.torrent.MetaInfo.Info.Name}, file.Path...), "/")
+			path := strings.Join(append([]string{rootDirectory}, file.Path...), "/")
 			d.files = append(d.files, openOrCreateFile(path, file.Length))
 			d.fileLocks = append(d.fileLocks, &sync.Mutex{})
 			d.fileOffsets = append(d.fileOffsets, offset)
@@ -68,8 +71,16 @@ func (d *randomAccessStorage) Init() {
 		}
 
 	} else {
+
+		// Create root directory
+		if _, err := appFS.Stat(infoHashHex); os.IsNotExist(err) {
+			err := appFS.Mkdir(infoHashHex, 0755)
+			fail(err)
+		}
+
 		// Single File Mode
-		file := openOrCreateFile(d.torrent.MetaInfo.Info.Name, d.torrent.MetaInfo.Info.Length)
+		fileName := strings.Join([]string{infoHashHex, d.torrent.MetaInfo.Info.Name}, "/")
+		file := openOrCreateFile(fileName, d.torrent.MetaInfo.Info.Length)
 		d.files = append(d.files, file)
 		d.fileLocks = append(d.fileLocks, &sync.Mutex{})
 		d.fileOffsets = append(d.fileOffsets, 0)
