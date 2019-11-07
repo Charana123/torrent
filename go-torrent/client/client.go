@@ -11,13 +11,13 @@ import (
 )
 
 type Client interface {
-	AddTorrent(torrentReader io.ReadSeeker)
-	RemoveTorrent(infoHashHex string)
-	RemoveTorrentAndData(infoHashHex string)
-	StartTorrent(torrentID string)
-	StopTorrent(torrentID string)
-	StopFile(torrentID string, fileIndex int)
-	StartFile(torrentID string, fileIndex int)
+	// AddTorrent(torrentt torrent.Torrent)
+	// RemoveTorrent(infoHashHex string)
+	// RemoveTorrentAndData(infoHashHex string)
+	// StartTorrent(torrentID string)
+	// StopTorrent(torrentID string)
+	// StopFile(torrentID string, fileIndex int)
+	// StartFile(torrentID string, fileIndex int)
 }
 
 type client struct {

@@ -15,6 +15,11 @@ import (
 	"github.com/Charana123/torrent/go-torrent/torrent"
 )
 
+type TorrentStats struct {
+	Peers   int
+	Seeders int
+}
+
 type TorrentDownload interface {
 	// Start() error
 	// Stop()
@@ -26,6 +31,7 @@ type TorrentDownload interface {
 	// Size() int
 	// Name() string
 	// NumPieces() int
+	// GetStats() TorrentStats
 }
 
 type torrentDownload struct {
@@ -94,21 +100,21 @@ func (d *torrentDownload) VerifyData() {
 }
 
 func (d *torrentDownload) GetFiles() []*FileDownload {
-
+	return nil
 }
 
 func (d *torrentDownload) GetInfoHash() []byte {
-
+	return nil
 }
 
 func (d *torrentDownload) Size() int {
-
+	return 0
 }
 
 func (d *torrentDownload) Name() string {
-
+	return ""
 }
 
 func (d *torrentDownload) NumPieces() int {
-
+	return 0
 }

@@ -1,30 +1,21 @@
 package main
 
 import (
-	"time"
+	"log"
+	"net/http"
 
-	"github.com/Charana123/torrent/go-torrent/download"
+	"github.com/Charana123/torrent/go-torrent/client"
 )
 
 func main() {
-	ln, err := net.Listen("tcp", ":9090")
-	if err != nil {
-		log.Fatal("Port already in use")
-	}
-	for {
-		conn, err := ln.Accept()
-		if err != nil {
-			continue
-		}
-		go handleConnection(conn)
-	}
-
-	d := download.NewDownload()
-	err := d.Start("/Users/deepaninandasena/Desktop/Work/go/src/github.com/Charana123/torrent/malone.torrent")
-	if err != nil {
-		panic(err)
-	}
-	time.Sleep(time.Hour)
+	sm := client.NewHTTPServeMux("/Users/charana/Downloads/temp")
+	sm.Handle("/", http.FileServer(http.Dir(".")))
+	http.ListenAndServe(":8080", logHandler(sm))
 }
 
-func 
+func logHandler(sm *client.HTTPServeMux) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		log.Printf("%s %s %s\n", r.RemoteAddr, r.Method, r.URL)
+		sm.ServeHTTP(rw, r)
+	})
+}
