@@ -1,4 +1,5 @@
 node_modules/
 torrent
+public/dist
 public/video/
 public/js/

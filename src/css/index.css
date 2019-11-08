@@ -1,0 +1,21 @@
+body {
+    background-color: rgb(20, 20, 20);
+    height: 2000px;
+    color: white;
+}
+
+#my-navbar {
+    background-color: black;
+}
+
+.video-icon {
+    font-size: 30px;
+}
+
+.current-torrent {
+    font-size: 30px;
+}
+
+.current-file {
+    font-size: 35px;
+}
