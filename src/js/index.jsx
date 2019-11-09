@@ -15,11 +15,11 @@ class Main extends React.Component {
         }
     }
 
-    setPlayerData(torrent, fileIndex){
+    setPlayerData(torrent, fi){
         this.setState({
             playerData: {
                 ctorrent: torrent,
-                ctorrentFileIndex: fileIndex,
+                ctorrentFileIndex: fi,
             }
         })
     }
@@ -27,7 +27,7 @@ class Main extends React.Component {
     render(){
         return (
             <React.Fragment>
-                <NavBar/>
+                {/* <NavBar/> */}
                 <VideoPlayer playerData={this.state.playerData}/>
                 <Menu setPlayerData={this.setPlayerData.bind(this)}/>
             </React.Fragment>

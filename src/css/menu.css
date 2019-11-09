@@ -1,0 +1,68 @@
+/* ====== Play Video Component ======= */
+
+.play-video-container {
+    width: 130px;
+}
+
+.stacked-container, .play-video-img {
+    height: 130px;
+    width: 130px;
+}
+
+.stacked-container {
+    position: relative;
+    top: 0;
+    left: 0;
+}
+
+.play-video-img, .play-video-progressbar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+
+.play-video-progressbar {
+    height: 80px;
+    width: 80px;
+    top: calc((130px - 80px)/2);
+    left: calc((130px - 80px)/2);
+    z-index: 2;
+}
+
+/* ======= Torrent Info Component ======== */
+.torrent-info-status-2 {
+    display: inline-block;
+}
+
+/* ======= Menu Component ======== */
+.menu-container {
+    margin-left: 30px;
+}
+
+.menu-item {
+    width: 1200px;
+    height: 300px;
+    
+    border-style: solid;
+    border-width: 1px;
+    border-color: rgb(0, 255, 0);
+    border-radius: 20px;
+    
+    clear: both;
+    margin-top: 30px;
+    background-color: #2a2a2a;
+    font-size: 20px;
+}
+
+.menu-body {
+    width: calc(1200px - 120px);
+}
+
+.add-torrent-btn {
+    background-color: #598a2f;
+}
+
+.add-torrent-btn:active {
+    background-color: #598a2f;
+}

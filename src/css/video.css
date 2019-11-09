@@ -1,0 +1,21 @@
+
+
+.player-info {
+    height: 100px;
+}
+
+.current-torrent {
+    font-size: 30px;
+}
+
+.current-file {
+    font-size: 35px;
+}
+
+.video-icon {
+    font-size: 30px;
+}
+
+.underline {
+    border-bottom: 2px solid grey;
+}

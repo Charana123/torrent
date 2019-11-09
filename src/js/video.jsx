@@ -1,5 +1,6 @@
 import React from 'react'
 import videojs from 'video.js'
+import '../css/video.css'
 
 export default class VideoPlayer extends React.Component {
     
@@ -29,7 +30,7 @@ export default class VideoPlayer extends React.Component {
         <div>	
           <div data-vjs-player>
             <video ref={node => this.videoNode = node} className="video-js"
-            controls preload='auto' width='1200' height='800' data-setup='{}'>
+            controls preload='auto' width='1800' data-setup='{}'>
                 <p className='vjs-no-js'>
                     To view this video please enable JavaScript, and consider upgrading to a web browser that
                     <a href='https://videojs.com/html5-video-support/' target='_blank'>supports HTML5 video</a>
@@ -37,7 +38,7 @@ export default class VideoPlayer extends React.Component {
             </video>
           </div>
           { this.props.playerData != null
-                ? <div>
+                ? <div className="player-info">
                     <div className="current-torrent"> {this.props.playerData.ctorrent.Name} </div>
                     <div className="current-file">
                         <div className="video-icon fas fa-video"/>
@@ -46,8 +47,9 @@ export default class VideoPlayer extends React.Component {
                         </span>
                     </div>
                 </div>
-                :  <div> </div>
+                :  <div className="player-info"> </div>
           }
+          <div className="underline"></div>
         </div>
       )
     }
