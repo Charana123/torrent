@@ -3,6 +3,7 @@ package client
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -19,6 +20,24 @@ func (sm *HTTPServeMux) uploadTorrent(rw http.ResponseWriter, r *http.Request) {
 		td := sm.client.AddTorrent(torrentReader)
 		td.Start()
 
+		rw.WriteHeader(http.StatusOK)
+	} else {
+		rw.WriteHeader(http.StatusNotFound)
+	}
+}
+
+func (sm *HTTPServeMux) magnetTorrent(rw http.ResponseWriter, r *http.Request) {
+	if r.Method == "POST" {
+		if magnetURI := r.URL.Query().Get("uri"); len(magnetURI) > 0 {
+			fmt.Println("magnetURI: ", magnetURI)
+			td, err := sm.client.AddMagnet(magnetURI)
+			if err != nil {
+				rw.WriteHeader(http.StatusBadRequest)
+			}
+			td.Start()
+		} else {
+			rw.WriteHeader(http.StatusBadRequest)
+		}
 		rw.WriteHeader(http.StatusOK)
 	} else {
 		rw.WriteHeader(http.StatusNotFound)
@@ -91,6 +110,7 @@ func NewHTTPServeMux(storagePath string) *HTTPServeMux {
 		client:   client,
 	}
 	httpSM.HandleFunc("/upload", httpSM.uploadTorrent)
+	httpSM.HandleFunc("/magnet", httpSM.magnetTorrent)
 	httpSM.HandleFunc("/command", httpSM.commandTorrent)
 	httpSM.HandleFunc("/stream", httpSM.streamTorrent)
 	return httpSM

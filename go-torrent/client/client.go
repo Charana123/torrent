@@ -2,16 +2,19 @@ package client
 
 import (
 	"encoding/hex"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
 	"os"
+	"regexp"
 
 	"github.com/Charana123/torrent/go-torrent/torrent"
 )
 
 type Client interface {
 	AddTorrent(torrentReader io.ReadSeeker) TorrentDownload
+	AddMagnet(magnetURI string) (TorrentDownload, error)
 	RemoveTorrent(infoHashHex string)
 	RemoveTorrentAndData(infoHashHex string)
 	GetTorrents() []TorrentDownload
@@ -66,6 +69,44 @@ func (c *client) init() {
 
 func (c *client) GetTorrents() []TorrentDownload {
 	return c.torrents
+}
+
+func parseMagnetURI(magnetURI string) (*torrent.MagnetURI, error) {
+	r1, _ := regexp.Compile(`magnet:\?xt=urn:(\S{4}):(\S{40})`)
+	g1 := r1.FindStringSubmatch(magnetURI)
+	if len(g1) == 0 {
+		return nil, fmt.Errorf("Malformed magnet URI")
+	}
+	if g1[1] == "btmh" {
+		return nil, fmt.Errorf("Client doesn't support multihash format")
+	}
+	muri := &torrent.MagnetURI{}
+	muri.InfoHashHex = g1[2]
+	r2, _ := regexp.Compile(`&(\S*?)=(\S*?)(?=(?:&|$))`)
+	if r2 == nil {
+		fmt.Printf("r2 is nil")
+	}
+	g2 := r2.FindAllStringSubmatch(magnetURI, -1)
+	for i := 0; i < len(g2); i++ {
+		if g2[i][1] == "name" {
+			muri.Name = g2[i][2]
+		}
+		if g2[i][1] == "tr" {
+			muri.Trackers = append(muri.Trackers, g2[i][2])
+		}
+		if g2[i][1] == "x.pe" {
+			muri.Peers = append(muri.Peers, g2[i][2])
+		}
+	}
+	return muri, nil
+}
+
+func (c *client) AddMagnet(magnetURI string) (TorrentDownload, error) {
+	muri, err := parseMagnetURI(magnetURI)
+	if err != nil {
+		return nil, err
+	}
+	return NewTorrentFromMagnet(muri), nil
 }
 
 func (c *client) AddTorrent(torrentReader io.ReadSeeker) TorrentDownload {

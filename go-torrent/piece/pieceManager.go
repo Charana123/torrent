@@ -1,6 +1,7 @@
 package piece
 
 import (
+	"github.com/Charana123/torrent/go-torrent/torrent"
 	"github.com/Charana123/torrent/go-torrent/wire"
 	bitmap "github.com/boljen/go-bitmap"
 	mapset "github.com/deckarep/golang-set"
@@ -16,6 +17,7 @@ type PieceManager interface {
 	GetBitField() (clientBitfield []byte)
 	VerifyBitField(bitfield bitmap.Bitmap)
 	PeerChoked(id string)
+	Init(tor *torrent.Torrent, clientBitfield bitmap.Bitmap)
 	PeerStopped(id string, peerBitfield *bitmap.Bitmap)
 	PieceHave(id string, pieceIndex int)
 	WriteBlock(id string, pieceIndex, blockIndex int, data []byte) (downloadedPiece bool, bannedPeers mapset.Set, err error)

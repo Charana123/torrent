@@ -30,6 +30,7 @@ type Peer interface {
 	GetWire() wire.Wire
 	SendUnchoke()
 	SendChoke()
+	StartDownloading(tor *torrent.Torrent)
 }
 
 var newWire = wire.NewWire
@@ -40,7 +41,6 @@ type peer struct {
 	closed                bool
 	storage               storage.Storage
 	torrent               *torrent.Torrent
-	muri                  *torrent.MagnetURI
 	peerMgr               PeerManager
 	pieceMgr              piece.PieceManager
 	mdMgr                 piece.MetadataManager
@@ -64,7 +64,7 @@ func NewPeer(
 	id string,
 	wire wire.Wire,
 	tor *torrent.Torrent,
-	muri *torrent.MagnetURI,
+	mdMgr piece.MetadataManager,
 	storage storage.Storage,
 	peerMgr PeerManager,
 	pieceMgr piece.PieceManager,
@@ -74,7 +74,7 @@ func NewPeer(
 		id:                    id,
 		wire:                  wire,
 		torrent:               tor,
-		muri:                  muri,
+		mdMgr:                 mdMgr,
 		storage:               storage,
 		peerMgr:               peerMgr,
 		pieceMgr:              pieceMgr,
@@ -147,11 +147,42 @@ func (p *peer) GetPeerInfo() (string, connState, int64) {
 	return p.id, p.state, p.lastPiece
 }
 
-func (p *peer) SetTorrent(tor *torrent.Torrent) {
+func (p *peer) StartDownloading(tor *torrent.Torrent) {
 	p.torrent = tor
-	if p.torrent != nil && p.state.clientInterested && !p.state.peerChoking {
-		p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
+	p.checkInterestForPeer()
+}
+
+func (p *peer) checkInterestForPeer() {
+	// If client doesn't have piece in peer bitfield, become interested
+	clientBitField := p.pieceMgr.GetBitField()
+	for pieceIndex := 0; pieceIndex < p.torrent.NumPieces; pieceIndex++ {
+		if p.checkInterestForPiece(p.peerBitfield, clientBitField, pieceIndex) {
+			break
+		}
 	}
+	if !p.state.clientInterested {
+		// We aren't interested in this peer, we shouldn't waste network
+		// and compute resources on it waiting for it to obtain a piece
+		// the client doesn't have
+		// note - makes the HAVE method redundant
+		p.peerMgr.BanPeerThisInterval(p.id)
+		p.Stop(fmt.Errorf("Redundant peer"), func() {}, false)
+	}
+}
+
+func (p *peer) checkInterestForPiece(peerBitfield *bitmap.Bitmap, clientBitField []byte, pieceIndex int) (clientInterested bool) {
+	if p.peerBitfield.Get(pieceIndex) && !bitmap.Get(clientBitField, pieceIndex) {
+		if !p.state.clientInterested {
+			p.state.clientInterested = true
+			err := p.wire.SendInterested()
+			p.BanPeerThisInterval()
+			if p.Stop(err, nil, false) {
+				return
+			}
+			return true
+		}
+	}
+	return false
 }
 
 func (p *peer) Start() {
@@ -223,13 +254,6 @@ func (p *peer) Start() {
 	}
 }
 
-// func (p *peer) MetadataExchange() {
-//
-// 	for {
-// 		case
-// 	}
-// }
-
 func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
 	case wire.EXTENDED:
@@ -243,9 +267,11 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 		bencode.Unmarshal(payload, &extendedHandshakePayload)
 		p.wire.SetExtendedMessageMap(extendedHandshakePayload.M)
 
-		// if extendedMessageID, ok := extendedHandshakePayload.M["ut_metadata"]; ok && p.torrent == nil {
-		// 	p.mdMgr.Init(extendedHandshakePayload.MetadataSize)
-		// }
+		extendedMessageID, ok := extendedHandshakePayload.M["ut_metadata"]
+		if ok && extendedMessageID != 0 && p.torrent == nil {
+			p.mdMgr.Init(extendedHandshakePayload.MetadataSize)
+			p.mdMgr.SendPieceRequest(p.id, p.wire)
+		}
 	case wire.UT_METADATA:
 		fmt.Println("peer: ", p.id, ", metadata")
 		pl := payload.Bytes()
@@ -268,7 +294,9 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			mm.Piece > p.mdMgr.GetNumMetaPieces()-1 {
 			p.Stop(fmt.Errorf("Malformed metadata response"), func() {}, false)
 		}
-		complete := p.mdMgr.WritePiece(mm.Piece, pieceData)
+		if !p.mdMgr.WritePiece(mm.Piece, pieceData) {
+			p.mdMgr.SendPieceRequest(p.id, p.wire)
+		}
 	case wire.CHOKE:
 		fmt.Println("peer: ", p.id, ", CHOKE")
 		if !p.state.peerChoking {
@@ -304,16 +332,11 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 		p.peerBitfield.Set(pieceIndex, true)
 
 		// If client doesn't have piece, become interested
-		if !bitmap.Get(p.pieceMgr.GetBitField(), pieceIndex) {
-			if !p.state.clientInterested {
-				p.state.clientInterested = true
-				err := p.wire.SendInterested()
-				p.BanPeerThisInterval()
-				if p.Stop(err, nil, false) {
-					return
-				}
-			}
+		if p.torrent != nil {
+			clientBitField := p.pieceMgr.GetBitField()
+			p.checkInterestForPiece(p.peerBitfield, clientBitField, pieceIndex)
 		}
+
 	case wire.BITFIELD:
 		fmt.Println("BITFIELD")
 		peerBitfield := payload.Bytes()
@@ -329,29 +352,8 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 		}
 		fmt.Println("peer: ", p.id, " bitfield: ", p.peerBitfield)
 
-		// If client doesn't have piece in peer bitfield, become interested
-		clientBitField := p.pieceMgr.GetBitField()
-		for pieceIndex := 0; pieceIndex < p.torrent.NumPieces; pieceIndex++ {
-			if p.peerBitfield.Get(pieceIndex) {
-				if !bitmap.Get(clientBitField, pieceIndex) {
-					p.state.clientInterested = true
-					err := p.wire.SendInterested()
-					p.BanPeerThisInterval()
-					fmt.Println("peer: ", p.id, ", interested: true")
-					if p.Stop(err, nil, false) {
-						return
-					}
-					break
-				}
-			}
-		}
-		if !p.state.clientInterested {
-			p.peerMgr.BanPeerThisInterval(p.id)
-			fmt.Println("banning peer")
-			// We aren't interested in this peer, we shouldn't waste network
-			// and compute resources on it
-			// note - makes the HAVE method redundant
-			p.Stop(fmt.Errorf("Redundant peer"), func() {}, false)
+		if p.torrent != nil {
+			p.checkInterestForPeer()
 		}
 	case wire.REQUEST:
 		fmt.Print("REQUEST")
@@ -401,6 +403,7 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			blockLength := len(blockData)
 
 			blockIndex := blockByteOffset / piece.BLOCK_SIZE
+			fmt.Println("PEER:", p.id, "PIECE", pieceIndex, "BLOCK", blockIndex)
 			go func() {
 				downloadedPiece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
 				if p.Stop(err, func() {

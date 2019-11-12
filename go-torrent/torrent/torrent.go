@@ -3,6 +3,7 @@ package torrent
 import (
 	"bytes"
 	"crypto/sha1"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -56,8 +57,24 @@ type File struct {
 	Path   []string
 }
 
+func NewTorrentFromMagnetURI(muri *MagnetURI, info *Info) *Torrent {
+	infoHash, _ := hex.DecodeString(muri.InfoHashHex)
+	tor := &Torrent{
+		InfoHash: infoHash,
+		MetaInfo: MetaInfo{
+			Info:         *info,
+			AnnounceList: [][]string{muri.Trackers},
+		},
+	}
+	tor.NumPieces = len(tor.MetaInfo.Info.Pieces) / 20
+	for i := 0; i < len(tor.MetaInfo.Info.Files); i++ {
+		tor.Length += tor.MetaInfo.Info.Files[i].Length
+	}
+	return tor
+}
+
 func NewTorrent(torrentReader io.ReadSeeker) (*Torrent, error) {
-	torrent := &Torrent{}
+	tor := &Torrent{}
 
 	metaInfo, err := bencode.Decode(torrentReader)
 	if err != nil {
@@ -75,22 +92,22 @@ func NewTorrent(torrentReader io.ReadSeeker) (*Torrent, error) {
 	infoBencode := &bytes.Buffer{}
 	bencode.Marshal(infoBencode, infoMap)
 	infoHash := sha1.Sum(infoBencode.Bytes())
-	torrent.InfoHash = infoHash[:]
+	tor.InfoHash = infoHash[:]
 
 	torrentReader.Seek(0, 0)
-	err = bencode.Unmarshal(torrentReader, &torrent.MetaInfo)
+	err = bencode.Unmarshal(torrentReader, &tor.MetaInfo)
 	if err != nil {
 		return nil, err
 	}
-	torrent.NumPieces = len(torrent.MetaInfo.Info.Pieces) / 20
+	tor.NumPieces = len(tor.MetaInfo.Info.Pieces) / 20
 
 	// Total size of all files
-	if len(torrent.MetaInfo.Info.Files) > 0 {
-		for i := 0; i < len(torrent.MetaInfo.Info.Files); i++ {
-			torrent.Length += torrent.MetaInfo.Info.Files[i].Length
+	if len(tor.MetaInfo.Info.Files) > 0 {
+		for i := 0; i < len(tor.MetaInfo.Info.Files); i++ {
+			tor.Length += tor.MetaInfo.Info.Files[i].Length
 		}
 	} else {
-		torrent.Length += torrent.MetaInfo.Info.Length
+		tor.Length += tor.MetaInfo.Info.Length
 	}
-	return torrent, nil
+	return tor, nil
 }

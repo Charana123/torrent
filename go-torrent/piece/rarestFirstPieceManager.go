@@ -45,21 +45,20 @@ type blockInfo struct {
 }
 
 func NewRarestFirstPieceManager(
-	storage storage.Storage,
-	clientBitField bitmap.Bitmap) PieceManager {
+	storage storage.Storage) PieceManager {
 
 	pm := &rarestFirst{
-		clientBitField: clientBitField,
-		storage:        storage,
-		peerToPiece:    make(map[string]int),
+		storage:     storage,
+		peerToPiece: make(map[string]int),
 	}
 
 	return pm
 }
 
-func (pm *rarestFirst) Init(tor *torrent.Torrent) {
+func (pm *rarestFirst) Init(tor *torrent.Torrent, clientBitfield bitmap.Bitmap) {
 
 	pm.tor = tor
+	pm.clientBitField = clientBitfield
 	bytesInLastPiece := pm.tor.Length - ((pm.tor.NumPieces - 1) * pm.tor.MetaInfo.Info.PieceLength)
 	pm.numBlocksInLastPiece = int(math.Ceil(float64(bytesInLastPiece) / float64(BLOCK_SIZE)))
 	pm.lengthOfLastBlock = bytesInLastPiece - (pm.numBlocksInLastPiece-1)*BLOCK_SIZE

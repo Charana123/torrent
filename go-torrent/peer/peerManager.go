@@ -35,7 +35,7 @@ type PeerManager interface {
 type peerManager struct {
 	sync.RWMutex
 	torrent                 *torrent.Torrent
-	muri                    *torrent.MagnetURI
+	mdMgr                   piece.MetadataManager
 	pieceMgr                piece.PieceManager
 	storage                 storage.Storage
 	stats                   stats.Stats
@@ -48,14 +48,14 @@ type peerManager struct {
 
 func NewPeerManager(
 	torrent *torrent.Torrent,
-	muri *torrent.MagnetURI,
 	pieceMgr piece.PieceManager,
+	mdMgr piece.MetadataManager,
 	storage storage.Storage,
 	stats stats.Stats) PeerManager {
 
 	return &peerManager{
 		torrent:                 torrent,
-		muri:                    muri,
+		mdMgr:                   mdMgr,
 		pieceMgr:                pieceMgr,
 		storage:                 storage,
 		stats:                   stats,
@@ -71,6 +71,9 @@ func (pm *peerManager) Init(tor *torrent.Torrent) {
 	defer pm.Unlock()
 
 	pm.torrent = tor
+	for _, peer := range pm.peers {
+		peer.StartDownloading(pm.torrent)
+	}
 }
 
 func (pm *peerManager) BanPeerThisInterval(id string) {
@@ -151,7 +154,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 		id,
 		w,
 		pm.torrent,
-		pm.muri,
+		pm.mdMgr,
 		pm.storage,
 		pm,
 		pm.pieceMgr,
