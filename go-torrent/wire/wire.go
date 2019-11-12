@@ -23,7 +23,7 @@ const (
 
 type Wire interface {
 	// Reading
-	ReadHandshake() (uint8, string, []byte, []byte, error)
+	ReadHandshake() (uint8, string, []byte, []byte, []byte, error)
 	ReadMessage() (int32, byte, []byte, error)
 
 	// Writing
@@ -60,7 +60,6 @@ func NewWire(
 	}
 }
 
-// 1 + 19 + 8 + 20 + 20
 type Handshake struct {
 	Len      uint8
 	Protocol [19]byte
@@ -101,16 +100,16 @@ func (w *wire) Close() {
 	w.conn.Close()
 }
 
-func (w *wire) ReadHandshake() (uint8, string, []byte, []byte, error) {
+func (w *wire) ReadHandshake() (uint8, string, []byte, []byte, []byte, error) {
 	h := &Handshake{}
 	w.conn.SetReadDeadline(time.Now().Add(w.timeoutDuration))
 	data := make([]byte, 68)
 	_, err := io.ReadFull(w.conn, data)
 	if err != nil {
-		return 0, "", nil, nil, err
+		return 0, "", nil, nil, nil, err
 	}
 	err = binary.Read(bytes.NewBuffer(data), binary.BigEndian, h)
-	return h.Len, string(h.Protocol[:]), h.InfoHash[:], h.PeerID[:], nil
+	return h.Len, string(h.Protocol[:]), h.Reserved[:], h.InfoHash[:], h.PeerID[:], nil
 }
 
 func (w *wire) ReadMessage() (int32, byte, []byte, error) {

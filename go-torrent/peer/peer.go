@@ -38,6 +38,7 @@ type peer struct {
 	closed                bool
 	storage               storage.Storage
 	torrent               *torrent.Torrent
+	muri                  *torrent.MagnetURI
 	peerMgr               PeerManager
 	pieceMgr              piece.PieceManager
 	wire                  wire.Wire
@@ -59,7 +60,8 @@ type connState struct {
 func NewPeer(
 	id string,
 	wire wire.Wire,
-	torrent *torrent.Torrent,
+	tor *torrent.Torrent,
+	muri *torrent.MagnetURI,
 	storage storage.Storage,
 	peerMgr PeerManager,
 	pieceMgr piece.PieceManager,
@@ -68,7 +70,8 @@ func NewPeer(
 	peer := &peer{
 		id:                    id,
 		wire:                  wire,
-		torrent:               torrent,
+		torrent:               tor,
+		muri:                  muri,
 		storage:               storage,
 		peerMgr:               peerMgr,
 		pieceMgr:              pieceMgr,
@@ -157,7 +160,7 @@ func (p *peer) Start() {
 	}
 
 	// recieve handshake
-	length, protocol, infoHash, _, err := p.wire.ReadHandshake()
+	length, protocol, reservedBytes, infoHash, _, err := p.wire.ReadHandshake()
 	if p.Stop(err, nil, false) {
 		return
 	}
@@ -168,6 +171,15 @@ func (p *peer) Start() {
 		p.Stop(fmt.Errorf("Malformed handshake"), nil, false)
 		return
 	}
+
+	if p.torrent == nil {
+		p.MetadataExchange()
+	} else {
+		p.StartTorrent()
+	}
+}
+
+func (p *peer) StartTorrent() {
 
 	// keep-alive thread
 	go func() {
@@ -206,6 +218,13 @@ func (p *peer) Start() {
 	}
 }
 
+func (p *peer) SetTorrent(tor *torrent.Torrent) {
+	p.torrent = tor
+	if p.torrent != nil && p.state.clientInterested && !p.state.peerChoking {
+		p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
+	}
+}
+
 func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
 	case wire.CHOKE:
@@ -227,9 +246,9 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 		fmt.Println("UNCHOKE")
 		if p.state.peerChoking {
 			p.state.peerChoking = false
-			go func() {
+			if p.state.clientInterested && !p.state.peerChoking {
 				p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
-			}()
+			}
 		}
 	case wire.INTERESTED:
 		fmt.Println("PEER_INTERESTED")
@@ -340,7 +359,6 @@ func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 			blockLength := len(blockData)
 
 			blockIndex := blockByteOffset / piece.BLOCK_SIZE
-			fmt.Println("PEER:", p.id, "PIECE", pieceIndex, "BLOCK", blockIndex)
 			go func() {
 				downloadedPiece, peers, err := p.pieceMgr.WriteBlock(p.id, pieceIndex, blockIndex, blockData)
 				if p.Stop(err, func() {

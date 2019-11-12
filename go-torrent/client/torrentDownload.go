@@ -2,8 +2,10 @@ package client
 
 import (
 	"bytes"
+	"fmt"
 	"io/ioutil"
 	"net/http"
+	"regexp"
 
 	"github.com/Charana123/torrent/go-torrent/piece"
 	"github.com/Charana123/torrent/go-torrent/server"
@@ -21,13 +23,11 @@ type TorrentStats struct {
 }
 
 type TorrentDownload interface {
-	// Start() error
-	// Stop()
-	// RemoveTorrent()
-	// RemoveTorrentAndData()
-	// VerifyData()
+	Start() error
+	Stop()
+	VerifyData()
 	// GetFiles() []*FileDownload
-	// GetInfoHash() []byte
+	GetInfoHash() []byte
 	// Size() int
 	// Name() string
 	// NumPieces() int
@@ -35,13 +35,16 @@ type TorrentDownload interface {
 }
 
 type torrentDownload struct {
-	stopped  bool
-	quit     chan int
-	peerMgr  peer.PeerManager
-	storage  storage.Storage
-	pieceMgr piece.PieceManager
-	stats    stats.Stats
-	tor      *torrent.Torrent
+	stopping      bool
+	stopped       bool
+	quit          chan int
+	peerMgr       peer.PeerManager
+	storage       storage.Storage
+	pieceMgr      piece.PieceManager
+	stats         stats.Stats
+	dataDirectory string
+	tor           *torrent.Torrent
+	muri          *torrent.MagnetURI
 }
 
 func getExternalIP() (string, error) {
@@ -59,10 +62,60 @@ func getExternalIP() (string, error) {
 	return string(bytes.TrimSpace(buf)), nil
 }
 
-func NewTorrentDownload(tor *torrent.Torrent) TorrentDownload {
-	return &torrentDownload{
-		tor: tor,
+func parseMagnetURI(magnetURI string) (*MagnetURI, error) {
+	r1, _ := regexp.Compile(`magnet:\?xt=urn:(\S{4}):(\S{40})`)
+	g1 := r1.FindStringSubmatch(magnetURI)
+	if len(g1) == 0 {
+		return nil, fmt.Errorf("Malformed magnet URI")
 	}
+	if g1[1] == "btmh" {
+		return nil, fmt.Errorf("Client doesn't support multihash format")
+	}
+	muri := &MagnetURI{}
+	muri.infoHashHex = g1[2]
+	r2, _ := regexp.Compile(`&(\S*?)=(\S*?)(?=(?:&|$))`)
+	g2 := r2.FindAllStringSubmatch(magnetURI, -1)
+	for i := 0; i < len(g2); i++ {
+		if g2[i][1] == "name" {
+			muri.name = g2[i][2]
+		}
+		if g2[i][1] == "tr" {
+			muri.trackers = append(muri.trackers, g2[i][2])
+		}
+		if g2[i][1] == "x.pe" {
+			muri.peers = append(muri.peers, g2[i][2])
+		}
+	}
+	return muri, nil
+}
+
+func NewTorrentFromMagnet(magnetURI string) (TorrentDownload, error) {
+	muri, err := parseMagnetURI(magnetURI)
+	if err != nil {
+		return nil, err
+	}
+	return &torrentDownload{
+		muri: muri,
+	}, nil
+}
+
+func NewTorrentDownload(tor *torrent.Torrent, dataDirectory string) TorrentDownload {
+	return &torrentDownload{
+		tor:           tor,
+		dataDirectory: dataDirectory,
+	}
+}
+
+func (d *torrentDownload) metadataExchange() {
+	// tr := &torrent.Torrent{
+	// 	InfoHash: []byte(d.muri.infoHashHex),
+	// 	MetaInfo: torrent.MetaInfo{
+	// 		AnnounceList: [][]string{d.muri.trackers},
+	// 	},
+	// }
+
+	// tracker.NewTracker(tr, nil)
+	// implement some way to insert
 }
 
 // Start/Resume downloading/uploading torrent
@@ -71,21 +124,37 @@ func (d *torrentDownload) Start() error {
 	quit := make(chan int)
 	d.quit = quit
 
-	d.storage = storage.NewRandomAccessStorage(d.tor)
-	d.storage.Init()
+	d.storage = storage.NewRandomAccessStorage(d.dataDirectory)
 	clientBitfield, _, left := d.storage.GetCurrentDownloadState()
 	d.stats = stats.NewStats(0, 0, left)
-	d.pieceMgr = piece.NewRarestFirstPieceManager(d.tor, d.storage, clientBitfield)
+	d.pieceMgr = piece.NewRarestFirstPieceManager(d.storage, clientBitfield)
 	d.peerMgr = peer.NewPeerManager(d.tor, d.pieceMgr, d.storage, d.stats)
-	choke := peer.NewChoke(d.tor, d.peerMgr, d.pieceMgr, d.stats, quit)
-	go choke.Start()
+	choke := peer.NewChoke(d.peerMgr, d.pieceMgr, d.stats, quit)
 	sv, err := server.NewServer(d.peerMgr, quit)
 	if err != nil {
 		return err
 	}
-	go sv.Serve()
-	tracker := tracker.NewTracker(d.tor, d.stats, d.peerMgr, quit, sv.GetServerPort())
+
+	// tracker
+	announceList := map[bool][][]string{
+		true: map[bool][][]string{
+			true: d.tor.MetaInfo.AnnounceList,
+			false: [][]string{[]string{d.tor.MetaInfo.Announce}}}[len(d.tor.MetaInfo.AnnounceList) > 0]
+		false: [][]string{d.muri.trackers}}[d.tor != nil]
+	infoHash := map[bool][]byte{
+		true: d.tor.InfoHash,
+		false: []byte(d.muri.InfoHash)}[d.tor != nil]
+	tracker := tracker.NewTracker(announceList, infoHash, d.stats, d.peerMgr, quit, sv.GetServerPort())
 	go tracker.Start()
+
+	go func() {
+		d.storage.Init(d.tor)
+		d.pieceMgr.Init(d.tor)
+		d.peerMgr.Init(d.tor)
+		go choke.Start(d.tor)
+		go sv.Serve(d.tor)
+	}()
+
 	return nil
 }
 
@@ -95,8 +164,10 @@ func (d *torrentDownload) Stop() {
 	go d.peerMgr.StopPeers()
 }
 
+// Used to remove corrupted pieces while a torrent is downloading/seeding
 func (d *torrentDownload) VerifyData() {
-
+	bitfield, _, _ := d.storage.GetCurrentDownloadState()
+	d.pieceMgr.VerifyBitField(bitfield)
 }
 
 func (d *torrentDownload) GetFiles() []*FileDownload {
@@ -104,7 +175,7 @@ func (d *torrentDownload) GetFiles() []*FileDownload {
 }
 
 func (d *torrentDownload) GetInfoHash() []byte {
-	return nil
+	return d.tor.InfoHash
 }
 
 func (d *torrentDownload) Size() int {

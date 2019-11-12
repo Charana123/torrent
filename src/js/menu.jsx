@@ -137,7 +137,7 @@ export default class Menu extends React.Component {
                         return (
                             <div className="menu-item" key={torrent.Name}>
                                 <div className="row">
-                                    <div className="menu-item-left-column col-auto ml-5"> 
+                                    <div className="menu-item-left-column-1 col-auto ml-5"> 
                                         <PlayVideo/>
                                     </div>
                                     <div className="col ml-5">
@@ -147,7 +147,7 @@ export default class Menu extends React.Component {
                                     </div>
                                 </div>
                                 <div className="row">
-                                    <div className="mt-3 menu-item-left-column col-auto ml-5">
+                                    <div className="menu-item-left-column-2 col-auto mt-3 ml-2">
                                         <div className="mt-3"> Date Added </div>
                                         <div> {torrent.DateAdded} </div>
                                         <div className="mt-3"> Total Files </div>

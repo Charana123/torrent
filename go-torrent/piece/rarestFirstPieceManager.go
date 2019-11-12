@@ -19,15 +19,15 @@ import (
 
 type rarestFirst struct {
 	sync.RWMutex
-	clientBitField      bitmap.Bitmap
-	tor                 *torrent.Torrent
-	numBlocks           int
-	numBlockInLastPiece int
-	lengthOfLastBlock   int
-	peerToPiece         map[string]int
-	pieceInfo           []*pieceInfo
-	storage             storage.Storage
-	piecesDownloaded    int
+	clientBitField       bitmap.Bitmap
+	tor                  *torrent.Torrent
+	numBlocks            int
+	numBlocksInLastPiece int
+	lengthOfLastBlock    int
+	peerToPiece          map[string]int
+	pieceInfo            []*pieceInfo
+	storage              storage.Storage
+	piecesDownloaded     int
 }
 
 type pieceInfo struct {
@@ -45,29 +45,32 @@ type blockInfo struct {
 }
 
 func NewRarestFirstPieceManager(
-	tor *torrent.Torrent,
 	storage storage.Storage,
 	clientBitField bitmap.Bitmap) PieceManager {
 
-	bytesInLastPiece := tor.Length - ((tor.NumPieces - 1) * tor.MetaInfo.Info.PieceLength)
-	numBlocksInLastPiece := int(math.Ceil(float64(bytesInLastPiece) / float64(BLOCK_SIZE)))
-	lengthOfLastBlock := bytesInLastPiece - (numBlocksInLastPiece-1)*BLOCK_SIZE
 	pm := &rarestFirst{
-		clientBitField:      clientBitField,
-		tor:                 tor,
-		storage:             storage,
-		numBlocks:           tor.MetaInfo.Info.PieceLength / BLOCK_SIZE,
-		numBlockInLastPiece: numBlocksInLastPiece,
-		lengthOfLastBlock:   lengthOfLastBlock,
-		peerToPiece:         make(map[string]int),
+		clientBitField: clientBitField,
+		storage:        storage,
+		peerToPiece:    make(map[string]int),
 	}
+
+	return pm
+}
+
+func (pm *rarestFirst) Init(tor *torrent.Torrent) {
+
+	pm.tor = tor
+	bytesInLastPiece := pm.tor.Length - ((pm.tor.NumPieces - 1) * pm.tor.MetaInfo.Info.PieceLength)
+	pm.numBlocksInLastPiece = int(math.Ceil(float64(bytesInLastPiece) / float64(BLOCK_SIZE)))
+	pm.lengthOfLastBlock = bytesInLastPiece - (pm.numBlocksInLastPiece-1)*BLOCK_SIZE
+	pm.numBlocks = pm.tor.MetaInfo.Info.PieceLength / BLOCK_SIZE
 
 	pis := make([]*pieceInfo, 0)
 	for i := 0; i < pm.tor.NumPieces; i++ {
 		pi := &pieceInfo{}
 		pi.blocks = make([]*blockInfo, 0)
 		if i == pm.tor.NumPieces-1 {
-			for j := 0; j < pm.numBlockInLastPiece; j++ {
+			for j := 0; j < pm.numBlocksInLastPiece; j++ {
 				pi.blocks = append(pi.blocks, &blockInfo{})
 			}
 		} else {
@@ -80,17 +83,35 @@ func NewRarestFirstPieceManager(
 	}
 	pm.pieceInfo = pis
 
-	for i := 0; i < tor.NumPieces; i++ {
+	for i := 0; i < pm.tor.NumPieces; i++ {
 		if pm.clientBitField.Get(i) {
 			pm.piecesDownloaded++
 		}
 	}
-
-	return pm
 }
 
 func (pm *rarestFirst) GetPiecesDownloaded() int {
+	pm.RLock()
+	defer pm.RUnlock()
+
 	return pm.piecesDownloaded
+}
+
+func (pm *rarestFirst) VerifyBitField(bitfield bitmap.Bitmap) {
+	pm.Lock()
+	defer pm.Unlock()
+
+	for i := 0; i < pm.clientBitField.Len(); i++ {
+		if pm.clientBitField.Get(i) && !bitfield.Get(i) {
+			pm.pieceInfo[i].downloaded = false
+			pm.pieceInfo[i].downloading = false
+			for bi := 0; bi < len(pm.pieceInfo[i].blocks); bi++ {
+				pm.pieceInfo[i].blocks[bi].downloaded = false
+				pm.pieceInfo[i].blocks[bi].downloading = false
+			}
+		}
+	}
+	pm.clientBitField = bitfield
 }
 
 func (pm *rarestFirst) GetBitField() []byte {
@@ -153,8 +174,8 @@ func (pm *rarestFirst) WriteBlock(id string, pieceIndex, blockIndex int, data []
 	if !pm.pieceInfo[pieceIndex].blocks[blockIndex].downloading {
 		return false, (mapset.Set)(nil), fmt.Errorf("downloaded incorrent block")
 	}
-	if ((pieceIndex != pm.tor.NumPieces-1 || blockIndex != pm.numBlockInLastPiece-1) && len(data) != BLOCK_SIZE) ||
-		((pieceIndex == pm.tor.NumPieces-1 && blockIndex == pm.numBlockInLastPiece-1) && len(data) != pm.lengthOfLastBlock) {
+	if ((pieceIndex != pm.tor.NumPieces-1 || blockIndex != pm.numBlocksInLastPiece-1) && len(data) != BLOCK_SIZE) ||
+		((pieceIndex == pm.tor.NumPieces-1 && blockIndex == pm.numBlocksInLastPiece-1) && len(data) != pm.lengthOfLastBlock) {
 		return false, (mapset.Set)(nil), fmt.Errorf("incorrent block size")
 	}
 	pm.pieceInfo[pieceIndex].blocks[blockIndex].downloaded = true
@@ -239,7 +260,7 @@ func (pm *rarestFirst) SendBlockRequests(id string, wire wire.Wire, peerBitfield
 	for blockIndex, block := range pm.pieceInfo[pieceIndex].blocks {
 		if !block.downloaded && !block.downloading {
 			var err error
-			if pieceIndex == pm.tor.NumPieces-1 && blockIndex == pm.numBlockInLastPiece-1 {
+			if pieceIndex == pm.tor.NumPieces-1 && blockIndex == pm.numBlocksInLastPiece-1 {
 				err = wire.SendRequest(pieceIndex, blockIndex*BLOCK_SIZE, pm.lengthOfLastBlock)
 			} else {
 				err = wire.SendRequest(pieceIndex, blockIndex*BLOCK_SIZE, BLOCK_SIZE)

@@ -178,8 +178,12 @@ body {
 
 /* ====== Play Video Component ======= */
 
-.play-video-container {
+.menu-item-left-column-1 {
     width: 130px;
+}
+
+.menu-item-left-column-2 {
+    width: 180px;
 }
 
 .stacked-container, .play-video-img {
@@ -230,7 +234,7 @@ body {
     clear: both;
     margin-top: 30px;
     background-color: #2a2a2a;
-    font-size: 20px;
+    font-size: 21px;
 }
 
 .menu-body {

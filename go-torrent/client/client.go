@@ -11,19 +11,21 @@ import (
 )
 
 type Client interface {
-	// AddTorrent(torrentt torrent.Torrent)
-	// RemoveTorrent(infoHashHex string)
-	// RemoveTorrentAndData(infoHashHex string)
-	// StartTorrent(torrentID string)
+	AddTorrent(torrentReader io.ReadSeeker) TorrentDownload
+	RemoveTorrent(infoHashHex string)
+	RemoveTorrentAndData(infoHashHex string)
+	GetTorrents() []TorrentDownload
+
 	// StopTorrent(torrentID string)
 	// StopFile(torrentID string, fileIndex int)
 	// StartFile(torrentID string, fileIndex int)
 }
 
 type client struct {
-	torrentDownloads map[string]TorrentDownload
-	torrentsPath     string
-	dataPath         string
+	// torrentDownloads map[string]TorrentDownload
+	torrents     []TorrentDownload
+	torrentsPath string
+	dataPath     string
 }
 
 func NewClient(storagePath string) Client {
@@ -62,21 +64,26 @@ func (c *client) init() {
 	}
 }
 
-// Add Torrent File
-func (c *client) AddTorrent(torrentReader io.ReadSeeker) {
-	infoHashHex := c.addTorrent(torrentReader)
-	c.saveTorrent(torrentReader, infoHashHex)
+func (c *client) GetTorrents() []TorrentDownload {
+	return c.torrents
 }
 
-func (c *client) addTorrent(torrentReader io.ReadSeeker) string {
+func (c *client) AddTorrent(torrentReader io.ReadSeeker) TorrentDownload {
+	td, infoHashHex := c.addTorrent(torrentReader)
+	c.saveTorrent(torrentReader, infoHashHex)
+	c.torrents = append(c.torrents, td)
+	return td
+}
+
+func (c *client) addTorrent(torrentReader io.ReadSeeker) (TorrentDownload, string) {
 	// Parse Torrent
 	tor, err := torrent.NewTorrent(torrentReader)
 	fail(err)
 
 	// Save Torrent
-	infoHashHex := hex.EncodeToString(tor.InfoHash)
-	c.torrentDownloads[infoHashHex] = NewTorrentDownload(tor)
-	return infoHashHex
+	td := NewTorrentDownload(tor, c.dataPath)
+	infoHashHex := hex.EncodeToString(td.GetInfoHash())
+	return td, infoHashHex
 }
 
 func (c *client) saveTorrent(torrentReader io.ReadSeeker, infoHashHex string) {
@@ -89,39 +96,33 @@ func (c *client) saveTorrent(torrentReader io.ReadSeeker, infoHashHex string) {
 	fail(err)
 }
 
-// Remove Torrent File
 func (c *client) RemoveTorrent(infoHashHex string) {
 	err := os.Remove(c.torrentsPath + "/" + infoHashHex)
 	fail(err)
 }
 
-// Remove Torrent File and Torrent Data
 func (c *client) RemoveTorrentAndData(infoHashHex string) {
 	c.RemoveTorrent(infoHashHex)
-	err := os.Remove(c.dataPath + "/" + infoHashHex)
+	err := os.RemoveAll(c.dataPath + "/" + infoHashHex)
 	fail(err)
 }
 
-func (c *client) VerifyData(infoHashHex string) {
+// func (c *client) StopTorrent(torrentID string) {
+// 	// c.torrentsStats[torrentID].stopped = true
+// 	// c.torrentDownloads[torrentID].StopTorrent()
+// }
 
-}
+// func (c *client) StartTorrent(torrentID string) {
+// 	// c.torrentsStats[torrentID].stopped = false
+// 	c.torrentDownloads[torrentID].Start()
+// }
 
-func (c *client) StopTorrent(torrentID string) {
-	// c.torrentsStats[torrentID].stopped = true
-	// c.torrentDownloads[torrentID].StopTorrent()
-}
+// func (c *client) StopFile(torrentID string, fileIndex int) {
+// 	// c.torrentsStats[torrentID].fileStopped[fileIndex] = true
+// 	// c.torrentDownloads[torrentID].StopFile()
+// }
 
-func (c *client) StartTorrent(torrentID string) {
-	// c.torrentsStats[torrentID].stopped = false
-	// c.torrentDownloads[torrentID].StartTorrent()
-}
-
-func (c *client) StopFile(torrentID string, fileIndex int) {
-	// c.torrentsStats[torrentID].fileStopped[fileIndex] = true
-	// c.torrentDownloads[torrentID].StopFile()
-}
-
-func (c *client) StartFile(torrentID string, fileIndex int) {
-	// c.torrentsStats[torrentID].fileStopped[fileIndex] = false
-	// c.torrentDownloads[torrentID].StartFile()
-}
+// func (c *client) StartFile(torrentID string, fileIndex int) {
+// 	// c.torrentsStats[torrentID].fileStopped[fileIndex] = false
+// 	// c.torrentDownloads[torrentID].StartFile()
+// }

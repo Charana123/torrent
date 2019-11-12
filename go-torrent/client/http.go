@@ -13,11 +13,11 @@ type HTTPServeMux struct {
 
 func (sm *HTTPServeMux) uploadTorrent(rw http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
-		// Add torrent to client
 		torrentBuff := &bytes.Buffer{}
 		torrentBuff.ReadFrom(r.Body)
-		// torrentReader := bytes.NewReader(torrentBuff.Bytes())
-		// sm.client.AddTorrent(torrentReader)
+		torrentReader := bytes.NewReader(torrentBuff.Bytes())
+		td := sm.client.AddTorrent(torrentReader)
+		td.Start()
 
 		rw.WriteHeader(http.StatusOK)
 	} else {

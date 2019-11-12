@@ -7,8 +7,6 @@ import (
 
 	"github.com/Charana123/torrent/go-torrent/peer"
 	"github.com/Charana123/torrent/go-torrent/stats"
-
-	"github.com/Charana123/torrent/go-torrent/torrent"
 )
 
 const (
@@ -23,7 +21,6 @@ type Tracker interface {
 }
 
 type tracker struct {
-	torrent    *torrent.Torrent
 	peerMgr    peer.PeerManager
 	stats      stats.Stats
 	quit       chan int
@@ -42,14 +39,14 @@ func genKey() int32 {
 }
 
 func NewTracker(
-	torrent *torrent.Torrent,
+	announceList [][]string,
+	infoHash []byte,
 	stats stats.Stats,
 	peerMgr peer.PeerManager,
 	quit chan int,
 	serverPort int) Tracker {
 
 	tr := &tracker{
-		torrent:    torrent,
 		quit:       quit,
 		serverPort: serverPort,
 		peerMgr:    peerMgr,
@@ -74,15 +71,11 @@ func (tr *tracker) queryTracker(trackerURL string, event int) error {
 }
 
 func (tr *tracker) queryTrackers(event int) {
-	if len(tr.torrent.MetaInfo.AnnounceList) > 0 {
-		for _, trackerURLs := range tr.torrent.MetaInfo.AnnounceList {
-			for _, trackerURL := range trackerURLs {
-				fmt.Println("querying tracker: ", trackerURL)
-				tr.queryTracker(trackerURL, event)
-			}
+	for _, trackerURLs := range tr.AnnounceList {
+		for _, trackerURL := range trackerURLs {
+			fmt.Println("querying tracker: ", trackerURL)
+			tr.queryTracker(trackerURL, event)
 		}
-	} else {
-		tr.queryTracker(tr.torrent.MetaInfo.Announce, event)
 	}
 }
 

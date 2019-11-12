@@ -19,16 +19,17 @@ import (
 
 type randomAccessStorage struct {
 	sync.RWMutex
-	torrent     *torrent.Torrent
-	fileLocks   []*sync.Mutex
-	files       []afero.File
-	fileOffsets []int
+	torrent       *torrent.Torrent
+	fileLocks     []*sync.Mutex
+	files         []afero.File
+	fileOffsets   []int
+	dataDirectory string
+	rootDirectory string
 }
 
-func NewRandomAccessStorage(
-	torrent *torrent.Torrent) Storage {
+func NewRandomAccessStorage(dataDirectory string) Storage {
 	return &randomAccessStorage{
-		torrent: torrent,
+		dataDirectory: dataDirectory,
 	}
 }
 
@@ -40,18 +41,21 @@ func openOrCreateFile(path string, length int) afero.File {
 	return file
 }
 
-func (d *randomAccessStorage) Init() {
+func (d *randomAccessStorage) Init(tor *torrent.Torrent) {
 	d.Lock()
 	defer d.Unlock()
 
+	d.torrent = tor
 	infoHashHex := hex.EncodeToString(d.torrent.InfoHash)
+	d.rootDirectory = strings.Join([]string{d.dataDirectory, infoHashHex}, "/")
+
 	if len(d.torrent.MetaInfo.Info.Files) > 0 {
 		// Multiple File Mode
 
 		// Create root directory
-		rootDirectory := strings.Join([]string{infoHashHex, d.torrent.MetaInfo.Info.Name}, "/")
+		rootDirectory := strings.Join([]string{d.rootDirectory, d.torrent.MetaInfo.Info.Name}, "/")
 		if _, err := appFS.Stat(rootDirectory); os.IsNotExist(err) {
-			err := appFS.Mkdir(rootDirectory, 0755)
+			err := appFS.MkdirAll(rootDirectory, 0755)
 			fail(err)
 		}
 
@@ -69,17 +73,14 @@ func (d *randomAccessStorage) Init() {
 			d.fileOffsets = append(d.fileOffsets, offset)
 			offset += file.Length
 		}
-
 	} else {
-
 		// Create root directory
-		if _, err := appFS.Stat(infoHashHex); os.IsNotExist(err) {
-			err := appFS.Mkdir(infoHashHex, 0755)
+		if _, err := appFS.Stat(d.rootDirectory); os.IsNotExist(err) {
+			err := appFS.Mkdir(d.rootDirectory, 0755)
 			fail(err)
 		}
-
 		// Single File Mode
-		fileName := strings.Join([]string{infoHashHex, d.torrent.MetaInfo.Info.Name}, "/")
+		fileName := strings.Join([]string{d.rootDirectory, d.torrent.MetaInfo.Info.Name}, "/")
 		file := openOrCreateFile(fileName, d.torrent.MetaInfo.Info.Length)
 		d.files = append(d.files, file)
 		d.fileLocks = append(d.fileLocks, &sync.Mutex{})
@@ -133,10 +134,7 @@ func (d *randomAccessStorage) readBlock(fileIndex, fileOffset, blockLength int) 
 
 		blockLength -= length
 		fileIndex++
-		if blockLength == 0 {
-			break
-		}
-		if fileIndex >= len(d.files) {
+		if blockLength > 0 && fileIndex >= len(d.files) {
 			return ([]byte)(nil), fmt.Errorf("reading beyond end of last file")
 		}
 		fileOffset = 0
@@ -174,9 +172,11 @@ func (d *randomAccessStorage) writePiece(fileIndex, fileOffset int, data []byte)
 		d.files[fileIndex].WriteAt(data[:length], int64(fileOffset))
 		d.fileLocks[fileIndex].Unlock()
 
+		// after writing, check
 		data = data[length:]
 		fileIndex++
-		if fileIndex >= len(d.files) {
+		if len(data) > 0 && fileIndex >= len(d.files) {
+			fmt.Println("fileIndex: ", fileIndex)
 			return fmt.Errorf("writing beyond end of last file")
 		}
 		fileOffset = 0

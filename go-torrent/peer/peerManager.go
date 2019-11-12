@@ -29,6 +29,7 @@ type PeerManager interface {
 	BanPeers(peers mapset.Set)
 	BanPeerThisInterval(id string)
 	NewInterval()
+	Init(tor *torrent.Torrent)
 }
 
 type peerManager struct {
@@ -45,13 +46,11 @@ type peerManager struct {
 }
 
 func NewPeerManager(
-	torrent *torrent.Torrent,
 	pieceMgr piece.PieceManager,
 	storage storage.Storage,
 	stats stats.Stats) PeerManager {
 
 	return &peerManager{
-		torrent:                 torrent,
 		pieceMgr:                pieceMgr,
 		storage:                 storage,
 		stats:                   stats,
@@ -60,6 +59,13 @@ func NewPeerManager(
 		peersBannedThisInterval: mapset.NewSet(),
 		maxPeers:                100,
 	}
+}
+
+func (pm *peerManager) Init(tor *torrent.Torrent) {
+	pm.Lock()
+	defer pm.Unlock()
+
+	pm.torrent = tor
 }
 
 func (pm *peerManager) BanPeerThisInterval(id string) {
@@ -119,7 +125,6 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 	pm.Lock()
 	defer pm.Unlock()
 
-	fmt.Println("added peer", id)
 	if pm.bannedPeers.Contains(id) || pm.peersBannedThisInterval.Contains(id) {
 		// Peer has been banned
 		return
@@ -141,6 +146,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 		id,
 		w,
 		pm.torrent,
+		muri,
 		pm.storage,
 		pm,
 		pm.pieceMgr,

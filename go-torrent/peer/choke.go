@@ -47,14 +47,12 @@ type choke struct {
 }
 
 func NewChoke(
-	torrent *torrent.Torrent,
 	peerMgr PeerManager,
 	pieceMgr piece.PieceManager,
 	stats stats.Stats,
 	quit chan int) Choke {
 
 	return &choke{
-		torrent:  torrent,
 		peerMgr:  peerMgr,
 		pieceMgr: pieceMgr,
 		stats:    stats,
@@ -160,7 +158,8 @@ func (c *choke) PrintDownloadPercentage() {
 	fmt.Println("download percentage: ", percentage)
 }
 
-func (c *choke) Start() {
+func (c *choke) Start(tor *torrent.Torrent) {
+	c.torrent = tor
 
 	for {
 		select {

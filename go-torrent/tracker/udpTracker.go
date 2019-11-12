@@ -89,9 +89,12 @@ func (tr *tracker) announceUDP(trackerConn *net.UDPConn, event int, connectionID
 	binary.Write(announceRequest, binary.BigEndian, action)
 	transactionID := rand.Int31()
 	binary.Write(announceRequest, binary.BigEndian, transactionID)
-	binary.Write(announceRequest, binary.BigEndian, tr.torrent.InfoHash)
+	binary.Write(announceRequest, binary.BigEndian, tr.InfoHash)
 	binary.Write(announceRequest, binary.BigEndian, torrent.PEER_ID)
-	uploaded, downloaded, left := tr.stats.GetTrackerStats()
+	var uploaded, downloaded, left int
+	if tr.stats != nil {
+		uploaded, downloaded, left = tr.stats.GetTrackerStats()
+	}
 	binary.Write(announceRequest, binary.BigEndian, int64(downloaded))
 	binary.Write(announceRequest, binary.BigEndian, int64(left))
 	binary.Write(announceRequest, binary.BigEndian, int64(uploaded))
