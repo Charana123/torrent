@@ -62,7 +62,7 @@ func getExternalIP() (string, error) {
 	return string(bytes.TrimSpace(buf)), nil
 }
 
-func parseMagnetURI(magnetURI string) (*MagnetURI, error) {
+func parseMagnetURI(magnetURI string) (*torrent.MagnetURI, error) {
 	r1, _ := regexp.Compile(`magnet:\?xt=urn:(\S{4}):(\S{40})`)
 	g1 := r1.FindStringSubmatch(magnetURI)
 	if len(g1) == 0 {
@@ -71,19 +71,19 @@ func parseMagnetURI(magnetURI string) (*MagnetURI, error) {
 	if g1[1] == "btmh" {
 		return nil, fmt.Errorf("Client doesn't support multihash format")
 	}
-	muri := &MagnetURI{}
-	muri.infoHashHex = g1[2]
+	muri := &torrent.MagnetURI{}
+	muri.InfoHashHex = g1[2]
 	r2, _ := regexp.Compile(`&(\S*?)=(\S*?)(?=(?:&|$))`)
 	g2 := r2.FindAllStringSubmatch(magnetURI, -1)
 	for i := 0; i < len(g2); i++ {
 		if g2[i][1] == "name" {
-			muri.name = g2[i][2]
+			muri.Name = g2[i][2]
 		}
 		if g2[i][1] == "tr" {
-			muri.trackers = append(muri.trackers, g2[i][2])
+			muri.Trackers = append(muri.Trackers, g2[i][2])
 		}
 		if g2[i][1] == "x.pe" {
-			muri.peers = append(muri.peers, g2[i][2])
+			muri.Peers = append(muri.Peers, g2[i][2])
 		}
 	}
 	return muri, nil
@@ -128,7 +128,7 @@ func (d *torrentDownload) Start() error {
 	clientBitfield, _, left := d.storage.GetCurrentDownloadState()
 	d.stats = stats.NewStats(0, 0, left)
 	d.pieceMgr = piece.NewRarestFirstPieceManager(d.storage, clientBitfield)
-	d.peerMgr = peer.NewPeerManager(d.tor, d.pieceMgr, d.storage, d.stats)
+	d.peerMgr = peer.NewPeerManager(d.tor, d.muri, d.pieceMgr, d.storage, d.stats)
 	choke := peer.NewChoke(d.peerMgr, d.pieceMgr, d.stats, quit)
 	sv, err := server.NewServer(d.peerMgr, quit)
 	if err != nil {
@@ -138,21 +138,21 @@ func (d *torrentDownload) Start() error {
 	// tracker
 	announceList := map[bool][][]string{
 		true: map[bool][][]string{
-			true: d.tor.MetaInfo.AnnounceList,
-			false: [][]string{[]string{d.tor.MetaInfo.Announce}}}[len(d.tor.MetaInfo.AnnounceList) > 0]
-		false: [][]string{d.muri.trackers}}[d.tor != nil]
+			true:  d.tor.MetaInfo.AnnounceList,
+			false: [][]string{[]string{d.tor.MetaInfo.Announce}}}[len(d.tor.MetaInfo.AnnounceList) > 0],
+		false: [][]string{d.muri.Trackers}}[d.tor != nil]
 	infoHash := map[bool][]byte{
-		true: d.tor.InfoHash,
-		false: []byte(d.muri.InfoHash)}[d.tor != nil]
+		true:  d.tor.InfoHash,
+		false: []byte(d.muri.InfoHashHex)}[d.tor != nil]
 	tracker := tracker.NewTracker(announceList, infoHash, d.stats, d.peerMgr, quit, sv.GetServerPort())
 	go tracker.Start()
 
 	go func() {
-		d.storage.Init(d.tor)
-		d.pieceMgr.Init(d.tor)
-		d.peerMgr.Init(d.tor)
+		// d.storage.Init(d.tor)
+		// d.pieceMgr.Init(d.tor)
+		// d.peerMgr.Init(d.tor)
 		go choke.Start(d.tor)
-		go sv.Serve(d.tor)
+		// go sv.Serve(d.tor)
 	}()
 
 	return nil

@@ -35,6 +35,7 @@ type PeerManager interface {
 type peerManager struct {
 	sync.RWMutex
 	torrent                 *torrent.Torrent
+	muri                    *torrent.MagnetURI
 	pieceMgr                piece.PieceManager
 	storage                 storage.Storage
 	stats                   stats.Stats
@@ -46,11 +47,15 @@ type peerManager struct {
 }
 
 func NewPeerManager(
+	torrent *torrent.Torrent,
+	muri *torrent.MagnetURI,
 	pieceMgr piece.PieceManager,
 	storage storage.Storage,
 	stats stats.Stats) PeerManager {
 
 	return &peerManager{
+		torrent:                 torrent,
+		muri:                    muri,
 		pieceMgr:                pieceMgr,
 		storage:                 storage,
 		stats:                   stats,
@@ -146,7 +151,7 @@ func (pm *peerManager) AddPeer(id string, conn net.Conn) {
 		id,
 		w,
 		pm.torrent,
-		muri,
+		pm.muri,
 		pm.storage,
 		pm,
 		pm.pieceMgr,

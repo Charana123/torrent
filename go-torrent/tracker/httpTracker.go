@@ -2,13 +2,11 @@ package tracker
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 
 	"github.com/Charana123/torrent/go-torrent/torrent"
-	"github.com/jackpal/bencode-go"
 )
 
 func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
@@ -21,7 +19,7 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	}
 
 	q := u.Query()
-	urlEncodedInfoHash := url.QueryEscape(string(tr.InfoHash))
+	urlEncodedInfoHash := url.QueryEscape(string(tr.infoHash))
 	q.Set("info_hash", urlEncodedInfoHash)
 	urlEncodedPeerID := url.QueryEscape(string(torrent.PEER_ID))
 	q.Set("peer_id", urlEncodedPeerID)
@@ -49,20 +47,20 @@ func (tr *tracker) queryHTTPTracker(trackerURL string, event int) error {
 	}
 	defer resp.Body.Close()
 
-	err = bencode.Unmarshal(resp.Body, tr.announceResp)
-	if err != nil {
-		return err
-	}
-	if tr.announceResp.FailureReason != "" {
-		return fmt.Errorf(tr.announceResp.FailureReason)
-	}
+	// err = bencode.Unmarshal(resp.Body, tr.announceResp)
+	// if err != nil {
+	// 	return err
+	// }
+	// if tr.announceResp.FailureReason != "" {
+	// 	return fmt.Errorf(tr.announceResp.FailureReason)
+	// }
 
-	peerAddrs := []byte(tr.announceResp.Peers)
-	if event != STOPPED {
-		for i := 0; i < len(peerAddrs); i += 6 {
-			ip := net.IPv4(peerAddrs[i+0], peerAddrs[i+1], peerAddrs[i+2], peerAddrs[i+3])
-			tr.peerMgr.AddPeer(ip.String(), nil)
-		}
-	}
+	// peerAddrs := []byte(tr.announceResp.Peers)
+	// if event != STOPPED {
+	// 	for i := 0; i < len(peerAddrs); i += 6 {
+	// 		ip := net.IPv4(peerAddrs[i+0], peerAddrs[i+1], peerAddrs[i+2], peerAddrs[i+3])
+	// 		tr.peerMgr.AddPeer(ip.String(), nil)
+	// 	}
+	// }
 	return nil
 }

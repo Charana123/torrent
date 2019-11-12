@@ -21,12 +21,14 @@ type Tracker interface {
 }
 
 type tracker struct {
-	peerMgr    peer.PeerManager
-	stats      stats.Stats
-	quit       chan int
-	serverPort int
-	key        int32
-	numwant    int32
+	announceList [][]string
+	infoHash     []byte
+	peerMgr      peer.PeerManager
+	stats        stats.Stats
+	quit         chan int
+	serverPort   int
+	key          int32
+	numwant      int32
 
 	interval      int32
 	totalLeechers int32 `bencode:"incomplete"`
@@ -47,12 +49,14 @@ func NewTracker(
 	serverPort int) Tracker {
 
 	tr := &tracker{
-		quit:       quit,
-		serverPort: serverPort,
-		peerMgr:    peerMgr,
-		key:        genKey(),
-		numwant:    -1,
-		stats:      stats,
+		announceList: announceList,
+		infoHash:     infoHash,
+		quit:         quit,
+		serverPort:   serverPort,
+		peerMgr:      peerMgr,
+		key:          genKey(),
+		numwant:      -1,
+		stats:        stats,
 	}
 	return tr
 }
@@ -71,7 +75,7 @@ func (tr *tracker) queryTracker(trackerURL string, event int) error {
 }
 
 func (tr *tracker) queryTrackers(event int) {
-	for _, trackerURLs := range tr.AnnounceList {
+	for _, trackerURLs := range tr.announceList {
 		for _, trackerURL := range trackerURLs {
 			fmt.Println("querying tracker: ", trackerURL)
 			tr.queryTracker(trackerURL, event)
@@ -88,7 +92,6 @@ func (tr *tracker) Start() {
 		case <-time.After(time.Second * time.Duration(tr.interval)):
 			tr.queryTrackers(NONE)
 			tr.peerMgr.NewInterval()
-			fmt.Println("interval: ", tr.interval)
 		}
 	}
 }

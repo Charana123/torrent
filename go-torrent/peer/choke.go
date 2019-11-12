@@ -34,7 +34,7 @@ type PeerInfo struct {
 }
 
 type Choke interface {
-	Start()
+	Start(tor *torrent.Torrent)
 }
 
 type choke struct {

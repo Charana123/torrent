@@ -3,9 +3,12 @@ package wire
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"time"
+
+	"github.com/jackpal/bencode-go"
 )
 
 const (
@@ -19,6 +22,8 @@ const (
 	BLOCK          = 7
 	CANCEL         = 8
 	PORT           = 9
+	EXTENDED       = 20
+	UT_METADATA    = 21
 )
 
 type Wire interface {
@@ -38,16 +43,20 @@ type Wire interface {
 	SendRequest(pieceIndex, begin, length int) error
 	SendBlock(pieceIndex, begin int, block []byte) error
 	// SendCancel(pieceIndex, begin, length int) error
+	SendExtended() error
+	SendExtendedMetadataRequest(pieceIndex int) error
 
 	// Other
+	SetExtendedMessageMap(extendedMessageMap map[string]int)
 	GetLastMessageSent() (lastMessageSent time.Time)
 	Close()
 }
 
 type wire struct {
-	conn            *net.TCPConn
-	timeoutDuration time.Duration
-	lastMessageSent time.Time
+	conn               *net.TCPConn
+	timeoutDuration    time.Duration
+	lastMessageSent    time.Time
+	extendedMessageMap map[string]int
 }
 
 func NewWire(
@@ -55,8 +64,9 @@ func NewWire(
 	timeoutDuration time.Duration) Wire {
 
 	return &wire{
-		conn:            conn,
-		timeoutDuration: timeoutDuration,
+		conn:               conn,
+		timeoutDuration:    timeoutDuration,
+		extendedMessageMap: make(map[string]int),
 	}
 }
 
@@ -66,6 +76,10 @@ type Handshake struct {
 	Reserved [8]uint8
 	InfoHash [20]byte
 	PeerID   [20]byte
+}
+
+func (w *wire) SetExtendedMessageMap(extendedMessageMap map[string]int) {
+	w.extendedMessageMap = extendedMessageMap
 }
 
 func (w *wire) GetLastMessageSent() time.Time {
@@ -78,10 +92,56 @@ func (w *wire) SendKeepAlive() error {
 	return w.sendMessage(b.Bytes())
 }
 
+type ExtendedHandshakePayload struct {
+	M            map[string]int `bencode:"m"`
+	MetadataSize int            `bencode:"metadata_size"`
+}
+
+func (w *wire) SendExtended() error {
+	extendedHandshakePayload := &ExtendedHandshakePayload{
+		M: make(map[string]int),
+	}
+	extendedHandshakePayload.M["ut_metadata"] = 0
+	payload := &bytes.Buffer{}
+	bencode.Marshal(payload, extendedHandshakePayload)
+
+	b := &bytes.Buffer{}
+	binary.Write(b, binary.BigEndian, int32(6+payload.Len()))
+	binary.Write(b, binary.BigEndian, uint8(EXTENDED))
+	binary.Write(b, binary.BigEndian, uint8(0))
+	binary.Write(b, binary.BigEndian, payload.Bytes())
+	return w.sendMessage(b.Bytes())
+}
+
+type MetadataMessage struct {
+	MessageType int `bencode:"msg_type"`
+	Piece       int `bencode:"piece"`
+	TotalSize   int `bencode:"total_size"`
+}
+
+func (w *wire) SendExtendedMetadataRequest(pieceIndex int) error {
+	if id, ok := w.extendedMessageMap["ut_metadata"]; !ok {
+		return fmt.Errorf("Metadata Exchange unsupported by peer")
+	} else {
+		payload := &bytes.Buffer{}
+		mm := &MetadataMessage{
+			MessageType: 0,
+			Piece:       pieceIndex,
+		}
+		bencode.Marshal(payload, mm)
+		b := &bytes.Buffer{}
+		binary.Write(b, binary.BigEndian, int32(5+payload.Len()))
+		binary.Write(b, binary.BigEndian, uint8(id))
+		binary.Write(b, binary.BigEndian, payload.Bytes())
+		return w.sendMessage(b.Bytes())
+	}
+	return nil
+}
+
 func (w *wire) SendHave(pieceIndex int) error {
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, int32(5))
-	binary.Write(b, binary.BigEndian, uint8(4))
+	binary.Write(b, binary.BigEndian, uint8(HAVE))
 	binary.Write(b, binary.BigEndian, int32(pieceIndex))
 	return w.sendMessage(b.Bytes())
 }
@@ -90,7 +150,10 @@ func (w *wire) SendHandshake(length uint8, protocol string, infohash []byte, pee
 	b := &bytes.Buffer{}
 	binary.Write(b, binary.BigEndian, length)
 	binary.Write(b, binary.BigEndian, []byte(protocol))
-	binary.Write(b, binary.BigEndian, make([]byte, 8))
+	reservedBytes := make([]byte, 8)
+	// client support BEP 0010 (Extension Protocol)
+	reservedBytes[5] = 0x10
+	binary.Write(b, binary.BigEndian, reservedBytes)
 	binary.Write(b, binary.BigEndian, infohash)
 	binary.Write(b, binary.BigEndian, peerID)
 	return w.sendMessage(b.Bytes())

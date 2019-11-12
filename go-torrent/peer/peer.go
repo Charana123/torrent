@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/jackpal/bencode-go"
+
 	"github.com/Charana123/torrent/go-torrent/piece"
 	"github.com/Charana123/torrent/go-torrent/stats"
 	"github.com/Charana123/torrent/go-torrent/storage"
@@ -41,6 +43,7 @@ type peer struct {
 	muri                  *torrent.MagnetURI
 	peerMgr               PeerManager
 	pieceMgr              piece.PieceManager
+	mdMgr                 piece.MetadataManager
 	wire                  wire.Wire
 	stats                 stats.Stats
 	readRequestCancelChan map[string]chan int
@@ -144,6 +147,13 @@ func (p *peer) GetPeerInfo() (string, connState, int64) {
 	return p.id, p.state, p.lastPiece
 }
 
+func (p *peer) SetTorrent(tor *torrent.Torrent) {
+	p.torrent = tor
+	if p.torrent != nil && p.state.clientInterested && !p.state.peerChoking {
+		p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
+	}
+}
+
 func (p *peer) Start() {
 	if p.wire == nil {
 		conn, err := net.DialTimeout("tcp4", p.id, time.Duration(2*time.Second))
@@ -172,14 +182,9 @@ func (p *peer) Start() {
 		return
 	}
 
-	if p.torrent == nil {
-		p.MetadataExchange()
-	} else {
-		p.StartTorrent()
+	if p.torrent == nil && reservedBytes[5]&0x10 > 0 {
+		p.wire.SendExtended()
 	}
-}
-
-func (p *peer) StartTorrent() {
 
 	// keep-alive thread
 	go func() {
@@ -218,15 +223,52 @@ func (p *peer) StartTorrent() {
 	}
 }
 
-func (p *peer) SetTorrent(tor *torrent.Torrent) {
-	p.torrent = tor
-	if p.torrent != nil && p.state.clientInterested && !p.state.peerChoking {
-		p.pieceMgr.SendBlockRequests(p.id, p.wire, p.peerBitfield)
-	}
-}
+// func (p *peer) MetadataExchange() {
+//
+// 	for {
+// 		case
+// 	}
+// }
 
 func (p *peer) decodeMessage(messageID uint8, payload *bytes.Buffer) {
 	switch messageID {
+	case wire.EXTENDED:
+		fmt.Println("peer: ", p.id, ", extended")
+		var extendedMessage uint8
+		binary.Read(payload, binary.BigEndian, &extendedMessage)
+		if extendedMessage != 0 {
+			p.Stop(fmt.Errorf("Extended Message ID is non-zero i.e. not a handshake message"), func() {}, false)
+		}
+		extendedHandshakePayload := &wire.ExtendedHandshakePayload{}
+		bencode.Unmarshal(payload, &extendedHandshakePayload)
+		p.wire.SetExtendedMessageMap(extendedHandshakePayload.M)
+
+		// if extendedMessageID, ok := extendedHandshakePayload.M["ut_metadata"]; ok && p.torrent == nil {
+		// 	p.mdMgr.Init(extendedHandshakePayload.MetadataSize)
+		// }
+	case wire.UT_METADATA:
+		fmt.Println("peer: ", p.id, ", metadata")
+		pl := payload.Bytes()
+		payload.Write(pl)
+
+		mm := &wire.MetadataMessage{}
+		err := bencode.Unmarshal(payload, mm)
+		if err != nil {
+			p.Stop(fmt.Errorf("Malformed metadata response"), func() {}, false)
+		}
+
+		bencode.Marshal(payload, mm)
+		if mm.MessageType != 1 {
+			p.Stop(fmt.Errorf("Metadata request rejected"), func() {}, false)
+		}
+
+		pieceData := pl[payload.Len():]
+		if mm.Piece < p.mdMgr.GetNumMetaPieces()-1 && len(pieceData) != piece.METADATA_PIECE_SIZE ||
+			mm.Piece == p.mdMgr.GetNumMetaPieces()-1 && len(pieceData) != mm.TotalSize-(p.mdMgr.GetNumMetaPieces()-1)*piece.METADATA_PIECE_SIZE ||
+			mm.Piece > p.mdMgr.GetNumMetaPieces()-1 {
+			p.Stop(fmt.Errorf("Malformed metadata response"), func() {}, false)
+		}
+		complete := p.mdMgr.WritePiece(mm.Piece, pieceData)
 	case wire.CHOKE:
 		fmt.Println("peer: ", p.id, ", CHOKE")
 		if !p.state.peerChoking {
